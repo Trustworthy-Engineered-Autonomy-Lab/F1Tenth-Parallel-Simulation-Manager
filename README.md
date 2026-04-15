@@ -8,10 +8,8 @@
 > docker ps -a -q --filter "name=session" | ForEach-Object { docker rm -f $_ }
 > ```
 
-\
-
 Run the bash file `.\start_f1tenth.ps1` to start the parallel simulation process. This process can take **a long time to build**, it builds the docker containers and binds their noVNC viewpoints while launching the relevant commands.
 
-Once finished, navigate to the **dashboard** to view all screens by clicking `dashboard.html` in the file tree or clicking the link provided in the terminal once the launch command is finished.
-\
+Once finished, navigate to the **dashboard** to view all screens by clicking `dashboard.html` in the file tree or clicking the link provided in the terminal once the launch command is finished. 
+
 In the dashboard, you can click `FULL` to go to that session's full screen view. 

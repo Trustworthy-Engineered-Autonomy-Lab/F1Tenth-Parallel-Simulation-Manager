@@ -31,6 +31,13 @@
         }
 
         .header-left { display: flex; align-items: center; gap: 15px; }
+        .tea-logo {
+            width: 28px;
+            height: 28px;
+            border-radius: 4px;
+            object-fit: cover;
+            border: 1px solid #30363d;
+        }
         .header-title { font-size: 0.9rem; font-weight: bold; color: #58a6ff; }
         
         .tabs { display: flex; gap: 5px; background: #0d1117; padding: 3px; border-radius: 6px; }
@@ -57,6 +64,17 @@
         .monitor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
         .monitor-header h3 { margin: 0; font-size: 0.7rem; color: #8b949e; }
         .external-link { color: #58a6ff; text-decoration: none; font-size: 0.65rem; border: 1px solid #30363d; padding: 1px 5px; border-radius: 3px; }
+
+        .footer {
+            width: 100%;
+            text-align: center;
+            padding: 14px 10px 18px;
+            color: #8b949e;
+            font-size: 0.8rem;
+            border-top: 1px solid #30363d;
+            margin-top: 18px;
+            background: #0d1117;
+        }
 
         /* THE CROPPING VIEWPORT */
         .iframe-wrapper {
@@ -87,6 +105,7 @@
 
     <header class="header">
         <div class="header-left">
+            <img class="tea-logo" src="https://tea.ece.ufl.edu/wp-content/uploads/2023/06/logo-by-stable-diffusion-cropped-feathered-2-150x150.jpg" alt="TEA Lab logo">
             <p class="header-title">F1TENTH PARALLEL SIMULATION DASHBOARD</p>
             <div class="tabs">
                 <button class="tab-btn active" onclick="setView('grid')">Grid View</button>
@@ -129,6 +148,8 @@
             </div>
         </div>
     </div>
+
+    <footer class="footer">Trustworthy Engineered Autonomy Lab (TEA) 2026 at the University of Florida.</footer>
 
     <script>
         const scaleSlider = document.getElementById('scaleSlider');

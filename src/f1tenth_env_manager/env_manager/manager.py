@@ -24,21 +24,15 @@ class EnvManager(Node):
         self.full_session_file = os.path.join(
             self.results_dir, f"full_session_data_{self.session_id}.csv"
         )
+        self.overtaking_events_file = os.path.join(
+            self.results_dir, "overtaking_events.csv"
+        )
         self.summary_file = os.path.join(
             self.results_dir, f"session_summary_{self.session_id}.csv"
         )
 
         # --- Logging Setup ---
-        with open(self.full_session_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                'timestamp',
-                'ego_x', 'ego_y',
-                'opp_x', 'opp_y',
-                'distance',
-                'ego_speed', 'opp_speed',
-                'ego_laps', 'opp_laps'
-            ])
+        self._initialize_result_files()
 
         # --- Publishers & Subscribers ---
         self.ego_reset_pub = self.create_publisher(PoseWithCovarianceStamped, '/initialpose', 10)
@@ -58,6 +52,10 @@ class EnvManager(Node):
         self.opp_laps = 0
         self.ego_laps_led = 0
         self.lap_winners = {}  # lap_number -> 'EGO' or 'OPP'
+        self.overtaking_event_count = 0
+        self.current_leader = None
+        self.pending_leader = None
+        self.pending_leader_count = 0
         self.session_finished = False
         self.winner = None
         self.start_timestamp = self.get_clock().now().nanoseconds / 1e9
@@ -72,6 +70,94 @@ class EnvManager(Node):
             f"MAX_LAPS={self.max_laps} | RESULTS_DIR={self.results_dir}"
         )
 
+    def _initialize_result_files(self):
+        with open(self.full_session_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'timestamp',
+                'ego_x', 'ego_y',
+                'opp_x', 'opp_y',
+                'distance',
+                'ego_speed', 'opp_speed',
+                'ego_laps', 'opp_laps'
+            ])
+
+        with open(self.overtaking_events_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'timestamp',
+                'overtaking_event_number',
+                'overtaking_car',
+                'lap'
+            ])
+
+    def _reset_overtake_state(self):
+        self.overtaking_event_count = 0
+        self.current_leader = None
+        self.pending_leader = None
+        self.pending_leader_count = 0
+
+    def _progress_score(self, lap_count, x_position):
+        return lap_count + (x_position / 1000.0)
+
+    def _determine_leader(self):
+        ego_score = self._progress_score(self.ego_laps, self.ego_pose[0])
+        opp_score = self._progress_score(self.opp_laps, self.opp_pose[0])
+        score_delta = ego_score - opp_score
+
+        if abs(score_delta) < 0.02:
+            return None
+
+        return 'EGO' if score_delta > 0 else 'OPP'
+
+    def _record_overtake_event(self, overtaking_car, timestamp):
+        self.overtaking_event_count += 1
+        lap = self.ego_laps if overtaking_car == 'EGO' else self.opp_laps
+
+        with open(self.overtaking_events_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                timestamp,
+                self.overtaking_event_count,
+                overtaking_car,
+                lap,
+            ])
+
+        self.get_logger().info(
+            f"Overtaking event #{self.overtaking_event_count}: {overtaking_car} ahead on lap {lap}"
+        )
+
+    def _update_overtaking_events(self, timestamp):
+        leader = self._determine_leader()
+
+        if leader is None:
+            self.pending_leader = None
+            self.pending_leader_count = 0
+            return
+
+        if self.current_leader is None:
+            self.current_leader = leader
+            self.pending_leader = None
+            self.pending_leader_count = 0
+            return
+
+        if leader == self.current_leader:
+            self.pending_leader = None
+            self.pending_leader_count = 0
+            return
+
+        if leader != self.pending_leader:
+            self.pending_leader = leader
+            self.pending_leader_count = 1
+            return
+
+        self.pending_leader_count += 1
+        if self.pending_leader_count >= 2:
+            self._record_overtake_event(leader, timestamp)
+            self.current_leader = leader
+            self.pending_leader = None
+            self.pending_leader_count = 0
+
     def log_to_csv(self):
         if self.session_finished:
             return
@@ -81,6 +167,8 @@ class EnvManager(Node):
             (self.ego_pose[1] - self.opp_pose[1]) ** 2
         )
         timestamp = self.get_clock().now().nanoseconds / 1e9
+
+        self._update_overtaking_events(timestamp)
 
         with open(self.full_session_file, 'a', newline='') as f:
             writer = csv.writer(f)
@@ -109,19 +197,11 @@ class EnvManager(Node):
         self.get_logger().info("Resetting cars and metrics...")
         now = self.get_clock().now().nanoseconds / 1e9
 
-        with open(self.full_session_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                'timestamp',
-                'ego_x', 'ego_y',
-                'opp_x', 'opp_y',
-                'distance',
-                'ego_speed', 'opp_speed',
-                'ego_laps', 'opp_laps'
-            ])
+        self._initialize_result_files()
 
         self.ego_laps, self.opp_laps, self.ego_laps_led = 0, 0, 0
         self.lap_winners = {}
+        self._reset_overtake_state()
         self.ego_start_time, self.opp_start_time = now, now
         self.ego_last_x, self.opp_last_x = 0.0, 0.0
         self.session_finished = False
