@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>F1TENTH Mission Control v6.0</title>
+    <style>
+        :root {
+            --dashboard-scale: 0.5;
+            --fixed-zoom: 1.4; /* Constant 40% zoom-in to crop dead space */
+            --base-width: 1728px;
+            --base-height: 972px;
+        }
+
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            margin: 0;
+            padding-top: 60px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* --- THIN STICKY HEADER --- */
+        .header {
+            position: fixed; top: 0; left: 0; right: 0; height: 50px;
+            background: #161b22; border-bottom: 1px solid #30363d;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 20px; z-index: 1000;
+        }
+
+        .header-left { display: flex; align-items: center; gap: 15px; }
+        .header-title { font-size: 0.9rem; font-weight: bold; color: #58a6ff; }
+        
+        .tabs { display: flex; gap: 5px; background: #0d1117; padding: 3px; border-radius: 6px; }
+        .tab-btn {
+            background: transparent; border: none; color: #8b949e;
+            padding: 4px 10px; font-size: 0.75rem; border-radius: 4px; cursor: pointer;
+        }
+        .tab-btn.active { background: #30363d; color: #ffffff; }
+
+        .header-right { display: flex; align-items: center; gap: 20px; }
+        .control-group { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; }
+        input[type=range] { cursor: pointer; width: 120px; }
+
+        /* --- LAYOUTS --- */
+        .main-container { padding: 20px; width: 98%; display: flex; justify-content: center; }
+        .grid-layout { display: flex; flex-wrap: wrap; justify-content: center; gap: 15px; }
+        .wide-layout { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 10px; width: 100%; }
+
+        .monitor {
+            background: #161b22; border: 1px solid #30363d;
+            border-radius: 6px; padding: 8px; display: flex; flex-direction: column;
+        }
+
+        .monitor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .monitor-header h3 { margin: 0; font-size: 0.7rem; color: #8b949e; }
+        .external-link { color: #58a6ff; text-decoration: none; font-size: 0.65rem; border: 1px solid #30363d; padding: 1px 5px; border-radius: 3px; }
+
+        /* THE CROPPING VIEWPORT */
+        .iframe-wrapper {
+            width: calc(var(--base-width) * var(--dashboard-scale));
+            height: calc(var(--base-height) * var(--dashboard-scale));
+            overflow: hidden;
+            position: relative;
+            background: #000;
+            border-radius: 4px;
+        }
+
+        iframe {
+            width: var(--base-width);
+            height: var(--base-height);
+            border: none;
+            position: absolute;
+            
+            /* --- PERFECT CENTERING LOGIC --- */
+            top: 50%;
+            left: 50%;
+            /* Translate moves the center of the iframe to the center of the wrapper, 
+               then scale handles the zoom */
+            transform: translate(-50%, -50%) scale(calc(var(--dashboard-scale) * var(--fixed-zoom)));
+        }
+    </style>
+</head>
+<body>
+
+    <header class="header">
+        <div class="header-left">
+            <p class="header-title">F1TENTH PARALLEL SIMULATION DASHBOARD</p>
+            <div class="tabs">
+                <button class="tab-btn active" onclick="setView('grid')">Grid View</button>
+                <button class="tab-btn" onclick="setView('wide')">Wide View</button>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <div class="control-group">
+                <span>Dashboard Scale: <b id="scaleLabel">50</b>%</span>
+                <input type="range" id="scaleSlider" min="0.1" max="1.0" step="0.05" value="0.5">
+            </div>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <div id="simContainer" class="grid-layout">
+            <div class="monitor">
+                <div class="monitor-header">
+                    <h3>SESSION 01</h3>
+                    <a href="http://localhost:8081/vnc_auto.html?autoconnect=true" target="_blank" class="external-link">FULL ↗</a>
+                </div>
+                <div class="iframe-wrapper"><iframe src="http://localhost:8081/vnc_auto.html?autoconnect=true"></iframe></div>
+            </div>
+
+            <div class="monitor">
+                <div class="monitor-header">
+                    <h3>SESSION 02</h3>
+                    <a href="http://localhost:8082/vnc_auto.html?autoconnect=true" target="_blank" class="external-link">FULL ↗</a>
+                </div>
+                <div class="iframe-wrapper"><iframe src="http://localhost:8082/vnc_auto.html?autoconnect=true"></iframe></div>
+            </div>
+
+            <div class="monitor">
+                <div class="monitor-header">
+                    <h3>SESSION 03</h3>
+                    <a href="http://localhost:8083/vnc_auto.html?autoconnect=true" target="_blank" class="external-link">FULL ↗</a>
+                </div>
+                <div class="iframe-wrapper"><iframe src="http://localhost:8083/vnc_auto.html?autoconnect=true"></iframe></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const scaleSlider = document.getElementById('scaleSlider');
+        const scaleLabel = document.getElementById('scaleLabel');
+        const simContainer = document.getElementById('simContainer');
+        const root = document.querySelector(':root');
+
+        scaleSlider.addEventListener('input', (e) => {
+            const val = e.target.value;
+            root.style.setProperty('--dashboard-scale', val);
+            scaleLabel.innerText = Math.round(val * 100);
+        });
+
+        function setView(viewType) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            simContainer.className = (viewType === 'grid') ? 'grid-layout' : 'wide-layout';
+        }
+    </script>
+</body>
+</html>

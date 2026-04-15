@@ -27,7 +27,7 @@ for ($i = 1; $i -le $NumSessions; $i++) {
     $sessionResults = Join-Path $resultsRoot "session_$i"
     New-Item -ItemType Directory -Force -Path $sessionResults | Out-Null
 
-    Write-Host "Starting Session $i (GUI at http://localhost:$vncPort) ..."
+    Write-Host "Starting Session $i..."
 
     # remove old no vncs
     docker rm -f $novncName 2>$null | Out-Null
@@ -64,3 +64,5 @@ Write-Host "Check logs with:"
 Write-Host "  docker logs -f f1tenth_session_1"
 Write-Host "  docker logs -f f1tenth_session_2"
 Write-Host "  docker logs -f f1tenth_session_3"
+Write-Host ""
+Write-Host "Dashboard to view sessions: file://$($repoRoot.Replace('\', '/'))/dashboard.html" -ForegroundColor Cyan
