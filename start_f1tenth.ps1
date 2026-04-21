@@ -14,10 +14,8 @@ Write-Host "[2/4] Building Docker image..."
 docker build -t $imageName .
 
 Write-Host "[3/4] Removing old session containers if they exist..."
-for ($i = 1; $i -le $NumSessions; $i++) {
-    $containerName = "f1tenth_session_$i"
-    docker rm -f $containerName 2>$null | Out-Null
-}
+# combine with loop below
+docker rm -f $(docker ps -aq --filter "name=f1tenth_session_") 2>$null
 
 Write-Host "[4/4] Launching $NumSessions parallel simulation containers..."
 for ($i = 1; $i -le $NumSessions; $i++) {
@@ -29,8 +27,9 @@ for ($i = 1; $i -le $NumSessions; $i++) {
 
     Write-Host "Starting Session $i..."
 
-    # remove old no vncs
+    # remove old containers
     docker rm -f $novncName 2>$null | Out-Null
+    docker rm -f $containerName 2>$null | Out-Null
 
     # launch no vnc with the according port address for the session id#
     docker run -d `
@@ -39,20 +38,23 @@ for ($i = 1; $i -le $NumSessions; $i++) {
         theasp/novnc:latest
 
     # launch the sim
-    $containerCmd = "chmod +x /sim_ws/src/f1tenth_gym_ros/auto_run_sim.sh && /sim_ws/src/f1tenth_gym_ros/auto_run_sim.sh"
+    # get unique identifiers and domains for each
+    $rosDomainId = $i    
+    $containerCmd = "/sim_ws/src/f1tenth_gym_ros/auto_run_sim.sh"
     
     docker run -d `
         --name $containerName `
         --link "${novncName}:novnc" `
         -e DISPLAY=novnc:0.0 `
         -e SESSION_ID=$i `
+        -e ROS_DOMAIN_ID=$rosDomainId `
         -e MAX_LAPS=$MaxLaps `
         -e RESULTS_DIR="/sim_ws/results/session_$i" `
         -e ATTACH_TMUX=0 `
         -v "${repoRoot}:/sim_ws/src/f1tenth_gym_ros" `
         -v "${sessionResults}:/sim_ws/results/session_$i" `
         $imageName `
-        -lc $containerCmd
+        $containerCmd
 }
 
 Write-Host ""

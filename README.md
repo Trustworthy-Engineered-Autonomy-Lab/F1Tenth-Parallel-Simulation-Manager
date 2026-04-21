@@ -3,7 +3,7 @@
 >This utilizes the `f1_gym_ros` containerized Docker simulator, for installation instructions and configuring the simulator please visit its [repository](https://github.com/f1tenth/f1tenth_gym_ros) and follow its documentation.
 
 > [!NOTE]
-> To kill all Docker containers after simulation if termination does not proceed properly use:
+> To kill **all** Docker containers after simulation if termination does not proceed properly use:
 > ```shell
 > docker ps -a -q --filter "name=session" | ForEach-Object { docker rm -f $_ }
 > ```
