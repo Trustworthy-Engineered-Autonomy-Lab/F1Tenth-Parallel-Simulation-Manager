@@ -13,3 +13,10 @@ Run the bash file `.\start_f1tenth.ps1` to start the parallel simulation process
 Once finished, navigate to the **dashboard** to view all screens by clicking `dashboard.html` in the file tree or clicking the link provided in the terminal once the launch command is finished. 
 
 In the dashboard, you can click `FULL` to go to that session's full screen view. 
+
+todo changes:
+- make rviz fullscreen upon launch
+- make robotmodel for opp show up automatically
+- ensure the data collection works (idt it does rn)
+- make the termination condition actually terminate the simulation
+  - includes ctrl c all panes or just killing all relevant docker containers 
