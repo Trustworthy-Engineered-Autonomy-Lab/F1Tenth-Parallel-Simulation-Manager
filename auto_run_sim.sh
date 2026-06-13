@@ -31,15 +31,16 @@ if [ -d "$WS_DIR/src/f1tenth_gym_ros/src/f1tenth_env_manager" ] && [ ! -d "$WS_D
     cp -r "$WS_DIR/src/f1tenth_gym_ros/src/f1tenth_env_manager" "$WS_DIR/src/f1tenth_env_manager"
 fi
 
+if [ -d "$WS_DIR/src/f1tenth_gym_ros/src/frenet_frame_conv" ] && [ ! -d "$WS_DIR/src/frenet_frame_conv" ]; then
+    echo "Flattening frenet_frame_conv..."
+    cp -r "$WS_DIR/src/f1tenth_gym_ros/src/frenet_frame_conv" "$WS_DIR/src/frenet_frame_conv"
+fi
+
 if [ -d "$WS_DIR/src/f1tenth_gym_ros/src/data_logger" ] && [ ! -d "$WS_DIR/src/data_logger" ]; then
     echo "Flattening data_logger..."
     cp -r "$WS_DIR/src/f1tenth_gym_ros/src/data_logger" "$WS_DIR/src/data_logger"
 fi
 
-if [ -d "$WS_DIR/src/f1tenth_gym_ros/src/frenet_frame_conv" ] && [ ! -d "$WS_DIR/src/frenet_frame_conv" ]; then
-    echo "Flattening frenet_frame_conv..."
-    cp -r "$WS_DIR/src/f1tenth_gym_ros/src/frenet_frame_conv" "$WS_DIR/src/frenet_frame_conv"
-fi
 
 # --- 3. The "Single Build" Fix ---
 # Build once here so the panes don't fight over the install/ folder
@@ -83,6 +84,27 @@ source install/local_setup.bash
 echo 'Launching Env Manager...'
 SESSION_ID=$SESSION_ID MAX_LAPS=$MAX_LAPS RESULTS_DIR=$RESULTS_DIR ros2 run env_manager main
 " C-m
+
+# Pane 3: Frenet Frame Converter
+tmux split-window -v -t "$TMUX_SESSION":0.2
+tmux send-keys -t "$TMUX_SESSION":0.3 "
+sleep 8
+source /opt/ros/foxy/setup.bash
+source install/local_setup.bash
+echo 'Launching Frenet Frame Converter...'
+ros2 run frenet_frame_conv frenet_node
+" C-m
+
+# Pane 4: Data Logger
+tmux split-window -v -t "$TMUX_SESSION":0.3
+tmux send-keys -t "$TMUX_SESSION":0.4 "
+sleep 10
+source /opt/ros/foxy/setup.bash
+source install/local_setup.bash
+echo 'Launching Data Logger...'
+SESSION_ID=$SESSION_ID RESULTS_DIR=$RESULTS_DIR ros2 run data_logger data_logger
+" C-m
+
 
 tmux select-layout -t "$TMUX_SESSION" tiled
 

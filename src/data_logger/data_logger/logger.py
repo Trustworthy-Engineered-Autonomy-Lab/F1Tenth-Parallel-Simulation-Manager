@@ -2,6 +2,7 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Int32, Bool, Float32MultiArray
+from geometry_msgs.msg import Pose2D
 import csv
 import os
 import math
@@ -70,8 +71,9 @@ class DataLogger(Node):
         self.create_subscription(Int32, '/env_manager/lap_num', self.lap_num_cb, 10)
         self.create_subscription(Odometry, ego_odom, self.ego_odom_cb, 10)
         self.create_subscription(Odometry, opp_odom, self.opp_odom_cb, 10)
-        self.create_subscription(Float32MultiArray, ego_frenet, self.ego_frenet_cb, 10)
-        self.create_subscription(Float32MultiArray, opp_frenet, self.opp_frenet_cb, 10)
+        self.create_subscription(Pose2D, ego_frenet, self.ego_frenet_cb, 10)
+        # TODO: uncomment
+        # self.create_subscription(Pose2D, opp_frenet, self.opp_frenet_cb, 10)
         self.create_subscription(Float32MultiArray, imm, self.imm_cb, 10)
 
         # Publisher
@@ -110,12 +112,12 @@ class DataLogger(Node):
         self.opp_vel = msg.twist.twist.linear.x
 
     def ego_frenet_cb(self, msg):
-        self.ego_s = msg.data[0]
-        self.ego_d = msg.data[1]
+        self.ego_s = msg.x  # s is in .x
+        self.ego_d = msg.y  # d is in .y
 
     def opp_frenet_cb(self, msg):
-        self.opp_s = msg.data[0]
-        self.opp_d = msg.data[1]
+        self.opp_s = msg.x  # s is in .x
+        self.opp_d = msg.y  # d is in .y
 
     def imm_cb(self, msg):
         self.imm_trajectory = list(msg.data)  # TODO: update when type is confirmed
