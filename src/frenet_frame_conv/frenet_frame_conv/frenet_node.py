@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import csv
 import numpy as np
 import rclpy
@@ -18,9 +19,17 @@ from cartesian into frenet coordinates (s, d).
 class FrenetNode(Node):
     def __init__(self):
         super().__init__("frenet_node")
-        csv_path = ("./centerline_csv/spielberg_centerline.csv")
-
-        csv_path = "example.csv"
+        
+        #build the csv path relative to this file specifically ie not the the whole working directory
+        package_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(
+            package_dir,
+            "..",
+            "centerline_csv",
+            "spielberg_centerline.csv"
+        )
+        csv_path = os.path.normpath(csv_path)
+        
         self.centerline = self.load_centerline(csv_path)
         self.arc_lengths = self.compute_arc_lengths(self.centerline)
 
