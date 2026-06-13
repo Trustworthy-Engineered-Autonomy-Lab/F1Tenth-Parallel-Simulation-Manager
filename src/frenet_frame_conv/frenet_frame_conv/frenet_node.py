@@ -21,7 +21,7 @@ class FrenetNode(Node):
 
     def __init__(self):
         super().__init__("frenet_node")
-        csv_path = ("example.csv")
+        csv_path = ("./centerline_csv/spielberg_centerline.csv")
 
         self.centerline = self.load_centerline(csv_path)
         self.arc_lengths = (

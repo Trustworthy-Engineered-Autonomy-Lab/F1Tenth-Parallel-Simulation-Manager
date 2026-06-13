@@ -1,2 +1,2 @@
 session_id,max_laps,winner,ego_laps,opp_laps,ego_laps_led,duration_sec,reason,finished_at
-1,3,EGO,3,0,3,44.649574756622314,max_laps_reached,2026-05-24T00:14:41.299973
+1,3,OPP,2,3,0,789.1622297763824,max_laps_reached,2026-06-13T18:37:41.813483

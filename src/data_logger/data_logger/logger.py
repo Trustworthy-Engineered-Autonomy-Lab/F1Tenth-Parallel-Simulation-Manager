@@ -1,118 +1,165 @@
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Int32, Bool, Float32MultiArray, String
+from std_msgs.msg import Int32, Bool, Float32MultiArray
 import csv
 import os
-from dataclasses import dataclass
+import math
 
 """
-This is all the topics and values being logged by this data_logger into csv fiels that can be
-found at the /sim_ftg/data/session_X/ directory where session_X is the respective session ID.
+Data Logger Node
+Logs all session telemetry to a single CSV per session.
 
-This data logger ALSO tracks when an overtake occurs and sends a message to the ENV_MANAGER
-node telling it to reset the session.
+Columns logged per timestep:
+    timestamp, lap,
+    ego_x, ego_y, ego_vel, ego_s, ego_d,
+    opp_x, opp_y, opp_vel, opp_s, opp_d,
+    rel_x, rel_y, rel_vel, rel_s, rel_d,
+    imm_trajectory
 
-    Note: Values below are logged for each the ego AND opp car unless explicilty specified
+Topics subscribed:
+    /env_manager/lap_num        - Int32
+    /ego_racecar/odom           - Odometry
+    /opp_racecar/odom           - Odometry
+    /ego_racecar/frenet         - Float32MultiArray [s, d]   TODO: confirm topic
+    /opp_racecar/frenet         - Float32MultiArray [s, d]   TODO: confirm topic
+    /ego_racecar/imm            - Float32MultiArray          TODO: confirm topic + type
 
-    Name - Topic - File Location
-
-    velocity - /x_racecar/odom - ./
-    frenet frame - /x_racecar/ - ./
-    
-
-
-
+Topics published:
+    /data_logger/overtake_detected  - Bool
 """
-
 
 
 class DataLogger(Node):
     def __init__(self):
         super().__init__('data_logger')
 
-        #--- Configuration Settings ---#
-        #
+        # Configuration
         on_sim = True
 
-        #--- CONFIGURING STORAGE OF DATA LOGS ---#
+        # Storage
         self.session_id = os.getenv("SESSION_ID", "1")
-        self.results_dir = os.getenv("RESULTS_DIR", f"/sim_ws/data/session_{self.session_id}")
+        self.results_dir = os.getenv("RESULTS_DIR", f"/sim_ws/results/session_{self.session_id}")
         self.data_dir = os.path.join(self.results_dir, "data")
+        os.makedirs(self.data_dir, exist_ok=True)
 
-        # individual folders for each data
-        self.odom_dir = os.path.join(self.data_dir, "odom")
-        self.accel_dir = os.path.join(self.data_dir, "accel")
-        self.trajectory_dir = os.path.join(self.data_dir, "trajectory")
+        self.session_csv = os.path.join(self.data_dir, f"session_{self.session_id}_data.csv")
+        self._init_csv()
 
-        # make dirs
-        os.makedirs(self.odom_dir, exist_ok=True)
-        os.makedirs(self.accel_dir, exist_ok=True)
-        os.makedirs(self.trajectory_dir, exist_ok=True)
+        # State Variables
+        self.lap_num = 0
 
+        self.ego_x, self.ego_y = 0.0, 0.0
+        self.ego_vel = 0.0
+        self.ego_s, self.ego_d = 0.0, 0.0
 
-        #--- SUBSCRIBING TO TOPICS TO LOG FROM ---#
-        # subscription addresses (allows us to switch easily if we use this on the irl car too)
+        self.opp_x, self.opp_y = 0.0, 0.0
+        self.opp_vel = 0.0
+        self.opp_s, self.opp_d = 0.0, 0.0
 
-        # session stuff
-        lap_num_topic = '/env_manager/lap_num' # TODO: check
-        
+        self.imm_trajectory = []  # whatever the IMM publishes
 
-        # where ego is typically the blue car and opp is the orange car
-        ego_odom = '/ego_racecar/odom' if on_sim else 'other_topic_for_irl_car'
-        opp_odom = '/opp_racecar/odom' if on_sim else 'other_topic_for_irl_car'
+        # Topics
+        ego_odom = '/ego_racecar/odom' if on_sim else 'TODO'
+        opp_odom = '/opp_racecar/odom' if on_sim else 'TODO'
+        ego_frenet = '/ego_racecar/frenet'   # TODO: confirm
+        opp_frenet = '/opp_racecar/frenet'   # TODO: confirm
+        imm = '/ego_racecar/imm'             # TODO: confirm
 
-        # TODO: point to correct topic (frenet frame)
-        ego_frenet = '/ego_racecar/frenet'
-        opp_frenet = '/opp_racecar/frenet'
-
-        # idt there are imu topics in the sim, might need to find accel ourselves
-        ego_imu = '/ego_racecar/imu'
-        opp_imu = '/opp_racecar/imu'
-
-        # TODO: point to correct topic
-        imm = '/ego_racecar/imm'
-        # opp_imm = '/opp_racecar/imm'
-
-
-        # subscribe to the topics
-        self.create_subscription(Int32, lap_num_topic, self.lap_num_cb, 10)
+        # Subscriptions
+        self.create_subscription(Int32, '/env_manager/lap_num', self.lap_num_cb, 10)
         self.create_subscription(Odometry, ego_odom, self.ego_odom_cb, 10)
         self.create_subscription(Odometry, opp_odom, self.opp_odom_cb, 10)
         self.create_subscription(Float32MultiArray, ego_frenet, self.ego_frenet_cb, 10)
         self.create_subscription(Float32MultiArray, opp_frenet, self.opp_frenet_cb, 10)
-        self.create_subscription(Int32, imm, self.imm_cb, 10) # int as a placeholder
+        self.create_subscription(Float32MultiArray, imm, self.imm_cb, 10)
 
-        #--- PUBLISHING ---#
-        # publish when an overtake occurs to reset the simulator (sent to manager.py)
-        self.overtake_pub = self.create_publisher(Bool, '/data_logger/overtake_detected')
+        # Publisher
+        self.overtake_pub = self.create_publisher(Bool, '/data_logger/overtake_detected', 10)
+
+        # Timer
+        self.create_timer(0.05, self.log_to_csv)
+
+        self.get_logger().info(f"DataLogger started | session={self.session_id}")
 
 
+    # file init
+    def _init_csv(self):
+        with open(self.session_csv, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'timestamp', 'lap',
+                'ego_x', 'ego_y', 'ego_vel', 'ego_s', 'ego_d',
+                'opp_x', 'opp_y', 'opp_vel', 'opp_s', 'opp_d',
+                'rel_x', 'rel_y', 'rel_vel', 'rel_s', 'rel_d',
+                'imm_trajectory'
+            ])
+
+    # subscriber callbacks
     def lap_num_cb(self, msg):
-        self.lap_num : int = msg
+        self.lap_num = msg.data
 
     def ego_odom_cb(self, msg):
-        pass
+        self.ego_x = msg.pose.pose.position.x
+        self.ego_y = msg.pose.pose.position.y
+        self.ego_vel = msg.twist.twist.linear.x
 
     def opp_odom_cb(self, msg):
-        pass
+        self.opp_x = msg.pose.pose.position.x
+        self.opp_y = msg.pose.pose.position.y
+        self.opp_vel = msg.twist.twist.linear.x
 
     def ego_frenet_cb(self, msg):
-        pass
+        self.ego_s = msg.data[0]
+        self.ego_d = msg.data[1]
 
     def opp_frenet_cb(self, msg):
-        pass
+        self.opp_s = msg.data[0]
+        self.opp_d = msg.data[1]
 
     def imm_cb(self, msg):
-        pass
+        self.imm_trajectory = list(msg.data)  # TODO: update when type is confirmed
 
+
+    # Timer: write combined row
+    def log_to_csv(self):
+        timestamp = self.get_clock().now().nanoseconds / 1e9
+
+        rel_x = self.opp_x - self.ego_x
+        rel_y = self.opp_y - self.ego_y
+        rel_vel = self.opp_vel - self.ego_vel
+        rel_s = self.opp_s - self.ego_s
+        rel_d = self.opp_d - self.ego_d
+
+        with open(self.session_csv, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                timestamp, self.lap_num,
+                self.ego_x, self.ego_y, self.ego_vel, self.ego_s, self.ego_d,
+                self.opp_x, self.opp_y, self.opp_vel, self.opp_s, self.opp_d,
+                rel_x, rel_y, rel_vel, rel_s, rel_d,
+                self.imm_trajectory
+            ])
+
+    # publisher
     def publish_overtake(self):
         msg = Bool()
         msg.data = True
         self.overtake_pub.publish(msg)
 
 
+def main(args=None):
+    rclpy.init(args=args)
+    node = DataLogger()
+    try:
+        rclpy.spin(node)
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
-
-
+if __name__ == '__main__':
+    main()
