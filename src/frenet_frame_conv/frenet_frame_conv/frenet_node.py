@@ -7,6 +7,8 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Pose2D
+from ament_index_python.packages import get_package_share_directory
+
 
 """
 Frenet conversion node
@@ -20,15 +22,9 @@ class FrenetNode(Node):
     def __init__(self):
         super().__init__("frenet_node")
         
-        #build the csv path relative to this file specifically ie not the the whole working directory
-        package_dir = os.path.dirname(os.path.abspath(__file__))
-        csv_path = os.path.join(
-            package_dir,
-            "..",
-            "centerline_csv",
-            "spielberg_centerline.csv"
-        )
-        csv_path = os.path.normpath(csv_path)
+        # Use ROS2's package share directory instead
+        pkg_share = get_package_share_directory('frenet_frame_conv')
+        csv_path = os.path.join(pkg_share, 'centerline_csv', 'spielberg_centerline.csv')
         
         self.centerline = self.load_centerline(csv_path)
         self.arc_lengths = self.compute_arc_lengths(self.centerline)

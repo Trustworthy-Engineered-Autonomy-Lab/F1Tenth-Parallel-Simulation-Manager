@@ -41,6 +41,17 @@ if [ -d "$WS_DIR/src/f1tenth_gym_ros/src/data_logger" ] && [ ! -d "$WS_DIR/src/d
     cp -r "$WS_DIR/src/f1tenth_gym_ros/src/data_logger" "$WS_DIR/src/data_logger"
 fi
 
+# DOESNTR WORK FOR NWO
+# if [ -d "$WS_DIR/src/f1tenth_gym_ros/src/lidar_processing" ] && [ ! -d "$WS_DIR/src/lidar_processing" ]; then
+#     echo "Flattening lidar_processing..."
+#     cp -r "$WS_DIR/src/f1tenth_gym_ros/src/lidar_processing" "$WS_DIR/src/lidar_processing"
+# fi
+
+if [ -d "$WS_DIR/src/f1tenth_gym_ros/src/overtake_controller" ] && [ ! -d "$WS_DIR/src/overtake_controller" ]; then
+    echo "Flattening overtake_controller..."
+    cp -r "$WS_DIR/src/f1tenth_gym_ros/src/overtake_controller" "$WS_DIR/src/overtake_controller"
+fi
+
 
 # --- 3. The "Single Build" Fix ---
 # Build once here so the panes don't fight over the install/ folder
@@ -57,7 +68,6 @@ tmux has-session -t "$TMUX_SESSION" 2>/dev/null && tmux kill-session -t "$TMUX_S
 tmux new-session -d -s "$TMUX_SESSION"
 
 # Pane 0: Simulator Bridge
-# No need to build here, just source and launch
 tmux send-keys -t "$TMUX_SESSION":0.0 "
 source /opt/ros/foxy/setup.bash
 source install/local_setup.bash
@@ -65,48 +75,34 @@ echo 'Launching Simulator Bridge...'
 ros2 launch f1tenth_gym_ros gym_bridge_launch.py
 " C-m
 
-# Pane 1: FTG Controller
+# Create pane 1 (split horizontally)
 tmux split-window -h -t "$TMUX_SESSION":0
+
+# Pane 1: All other nodes in sequence
 tmux send-keys -t "$TMUX_SESSION":0.1 "
+source /opt/ros/foxy/setup.bash
+source install/local_setup.bash
 sleep 5
-source /opt/ros/foxy/setup.bash
-source install/local_setup.bash
-echo 'Launching FTG Controller...'
-ros2 run sim_ftg both
-" C-m
-
-# Pane 2: Environment Manager
-tmux split-window -v -t "$TMUX_SESSION":0.1
-tmux send-keys -t "$TMUX_SESSION":0.2 "
-sleep 7
-source /opt/ros/foxy/setup.bash
-source install/local_setup.bash
+echo 'Launching Ego FTG (reactive/dummy)...'
+ros2 run sim_ftg ego &
+sleep 2
+echo 'Launching IMM Filter (for opponent)...'
+ros2 run overtake_controller imm_filter &
+sleep 2
+echo 'Launching Opponent Overtaking Controller...'
+ros2 run overtake_controller overtake &
+sleep 3
 echo 'Launching Env Manager...'
-SESSION_ID=$SESSION_ID MAX_LAPS=$MAX_LAPS RESULTS_DIR=$RESULTS_DIR ros2 run env_manager main
-" C-m
-
-# Pane 3: Frenet Frame Converter
-tmux split-window -v -t "$TMUX_SESSION":0.2
-tmux send-keys -t "$TMUX_SESSION":0.3 "
-sleep 8
-source /opt/ros/foxy/setup.bash
-source install/local_setup.bash
-echo 'Launching Frenet Frame Converter...'
-ros2 run frenet_frame_conv frenet_node
-" C-m
-
-# Pane 4: Data Logger
-tmux split-window -v -t "$TMUX_SESSION":0.3
-tmux send-keys -t "$TMUX_SESSION":0.4 "
-sleep 10
-source /opt/ros/foxy/setup.bash
-source install/local_setup.bash
+SESSION_ID=$SESSION_ID MAX_LAPS=$MAX_LAPS RESULTS_DIR=$RESULTS_DIR ros2 run env_manager main &
+sleep 3
+echo 'Launching Frenet Node...'
+ros2 run frenet_frame_conv frenet_node &
+sleep 3
 echo 'Launching Data Logger...'
 SESSION_ID=$SESSION_ID RESULTS_DIR=$RESULTS_DIR ros2 run data_logger data_logger
 " C-m
 
-
-tmux select-layout -t "$TMUX_SESSION" tiled
+tmux select-layout -t "$TMUX_SESSION" even-horizontal
 
 # --- 5. Attach or Keep Alive ---
 if [ "$ATTACH_TMUX" = "1" ]; then

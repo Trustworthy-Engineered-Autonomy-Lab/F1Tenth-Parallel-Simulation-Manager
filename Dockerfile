@@ -25,16 +25,18 @@ FROM ros:foxy
 SHELL ["/bin/bash", "-c"]
 
 # dependencies
-RUN apt-get update --fix-missing && \
-    apt-get install -y git \
+RUN DEBIAN_FRONTEND=noninteractive apt-get update --fix-missing && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y git \
                        nano \
                        vim \
                        python3-pip \
                        libeigen3-dev \
                        tmux \
-                       ros-foxy-rviz2
+                       ros-foxy-rviz2 \
+                       ros-foxy-pcl-ros \
+                       ros-foxy-sensor-msgs-py
 RUN apt-get -y dist-upgrade
-RUN pip3 install transforms3d
+RUN pip3 install transforms3d filterpy scikit-learn
 
 # f1tenth gym
 RUN git clone https://github.com/f1tenth/f1tenth_gym

@@ -6,6 +6,8 @@ from geometry_msgs.msg import Pose2D
 import csv
 import os
 import math
+from nav_msgs.msg import Path
+
 
 """
 Data Logger Node
@@ -65,16 +67,15 @@ class DataLogger(Node):
         opp_odom = '/opp_racecar/odom' if on_sim else 'TODO'
         ego_frenet = '/ego_racecar/frenet'   # TODO: confirm
         opp_frenet = '/opp_racecar/frenet'   # TODO: confirm
-        imm = '/ego_racecar/imm'             # TODO: confirm
+        imm_path_topic = '/imm_path'
 
         # Subscriptions
         self.create_subscription(Int32, '/env_manager/lap_num', self.lap_num_cb, 10)
         self.create_subscription(Odometry, ego_odom, self.ego_odom_cb, 10)
         self.create_subscription(Odometry, opp_odom, self.opp_odom_cb, 10)
         self.create_subscription(Pose2D, ego_frenet, self.ego_frenet_cb, 10)
-        # TODO: uncomment
-        # self.create_subscription(Pose2D, opp_frenet, self.opp_frenet_cb, 10)
-        self.create_subscription(Float32MultiArray, imm, self.imm_cb, 10)
+        self.create_subscription(Pose2D, opp_frenet, self.opp_frenet_cb, 10)
+        self.create_subscription(Path, imm_path_topic, self.imm_cb, 10)
 
         # Publisher
         self.overtake_pub = self.create_publisher(Bool, '/data_logger/overtake_detected', 10)
@@ -120,7 +121,10 @@ class DataLogger(Node):
         self.opp_d = msg.y  # d is in .y
 
     def imm_cb(self, msg):
-        self.imm_trajectory = list(msg.data)  # TODO: update when type is confirmed
+        # msg.poses is a list of PoseStamped
+        # Extract the predicted waypoints
+        waypoints = [(pose.pose.position.x, pose.pose.position.y) for pose in msg.poses]
+        self.imm_trajectory = waypoints
 
 
     # Timer: write combined row
