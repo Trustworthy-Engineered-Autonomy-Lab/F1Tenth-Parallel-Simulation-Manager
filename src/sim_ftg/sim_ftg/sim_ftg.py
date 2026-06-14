@@ -173,5 +173,23 @@ def main(args=None):
         opp_node.destroy_node()
         rclpy.shutdown()
 
+
+def ego_main(args=None):
+    """Launch only the ego car FTG controller"""
+    rclpy.init(args=args)
+    
+    ego_node = ReactiveFollowGap("ego", "/scan", "/drive")
+    
+    try:
+        rclpy.spin(ego_node)
+    except KeyboardInterrupt:
+        print("\n[sim_ftg ego] Shutdown signal received. Stopping ego car...")
+        ego_node.stop_car()
+        time.sleep(0.2)
+    finally:
+        ego_node.destroy_node()
+        rclpy.shutdown()
+
+
 if __name__ == '__main__':
     main()

@@ -45,7 +45,7 @@ class IMMNode(Node):
         self.imm_model_inactive =  False
         
         # 🚨 UPDATED: Explicitly naming topics to track the Ego car
-        self.imm_active_pub = self.create_publisher(String, '/ego_imm_active', 10)
+        self.imm_active_pub = self.create_publisher(String, '/imm_active', 10)
         self.imm_active_cb_timer = self.create_timer(0.020, self.imm_active_cb, None, self.get_clock())
         
         # 🚨 THE SIMULATOR TOGGLE 🚨
@@ -59,7 +59,7 @@ class IMMNode(Node):
             self.odom_sub = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
             
         # 🚨 UPDATED: Explicitly naming topics to track the Ego car
-        self.traj_pub = self.create_publisher(Path, '/ego_imm_path', 10)
+        self.traj_pub = self.create_publisher(Path, '/imm_path', 10)
         
         self.wait_count = 0
         self.chosen_filter_pub = self.create_publisher(String, '/chosen_filter', 10)

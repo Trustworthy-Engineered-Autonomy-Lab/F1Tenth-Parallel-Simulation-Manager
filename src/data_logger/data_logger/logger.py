@@ -7,6 +7,7 @@ import csv
 import os
 import math
 from nav_msgs.msg import Path
+from std_msgs.msg import String
 
 
 """
@@ -50,6 +51,7 @@ class DataLogger(Node):
         self._init_csv()
 
         # State Variables
+        self.imm_active = False
         self.lap_num = 0
 
         self.ego_x, self.ego_y = 0.0, 0.0
@@ -76,6 +78,8 @@ class DataLogger(Node):
         self.create_subscription(Pose2D, ego_frenet, self.ego_frenet_cb, 10)
         self.create_subscription(Pose2D, opp_frenet, self.opp_frenet_cb, 10)
         self.create_subscription(Path, imm_path_topic, self.imm_cb, 10)
+        self.create_subscription(String, '/imm_active', self.imm_active_cb, 10)
+
 
         # Publisher
         self.overtake_pub = self.create_publisher(Bool, '/data_logger/overtake_detected', 10)
@@ -95,10 +99,14 @@ class DataLogger(Node):
                 'ego_x', 'ego_y', 'ego_vel', 'ego_s', 'ego_d',
                 'opp_x', 'opp_y', 'opp_vel', 'opp_s', 'opp_d',
                 'rel_x', 'rel_y', 'rel_vel', 'rel_s', 'rel_d',
-                'imm_trajectory'
+                'imm_trajectory', 'imm_active'
             ])
 
     # subscriber callbacks
+
+    def imm_active_cb(self, msg):
+        self.imm_active = (msg.data == "True")
+
     def lap_num_cb(self, msg):
         self.lap_num = msg.data
 
@@ -144,7 +152,7 @@ class DataLogger(Node):
                 self.ego_x, self.ego_y, self.ego_vel, self.ego_s, self.ego_d,
                 self.opp_x, self.opp_y, self.opp_vel, self.opp_s, self.opp_d,
                 rel_x, rel_y, rel_vel, rel_s, rel_d,
-                self.imm_trajectory
+                self.imm_trajectory, self.imm_active
             ])
 
     # publisher

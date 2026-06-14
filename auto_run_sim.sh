@@ -83,8 +83,8 @@ tmux send-keys -t "$TMUX_SESSION":0.1 "
 source /opt/ros/foxy/setup.bash
 source install/local_setup.bash
 sleep 5
-echo 'Launching Ego FTG (reactive/dummy)...'
-ros2 run sim_ftg ego &
+echo 'Launching Ego FTG (slower, from overtake package)...'
+ros2 run overtake_controller ego_ftg &
 sleep 2
 echo 'Launching IMM Filter (for opponent)...'
 ros2 run overtake_controller imm_filter &

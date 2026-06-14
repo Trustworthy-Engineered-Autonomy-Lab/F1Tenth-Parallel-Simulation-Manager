@@ -23,6 +23,7 @@ setup(
     entry_points={
         'console_scripts': [
             'both = sim_ftg.sim_ftg:main',
+            'ego = sim_ftg.sim_ftg:ego_main',
         ],
     },
 )

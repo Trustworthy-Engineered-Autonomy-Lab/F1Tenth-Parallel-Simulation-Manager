@@ -20,8 +20,8 @@ class FairOpponentInterceptorNode(Node):
         self.scan_sub = self.create_subscription(LaserScan, '/opp_scan', self.scan_callback, 10)
         
         # 2. Perception Pipeline: The opponent uses the IMM filter to guess the Ego car's location
-        self.target_imm_sub = self.create_subscription(Path, '/ego_imm_path', self.target_imm_callback, 10)
-        self.target_imm_active_sub = self.create_subscription(String, '/ego_imm_active', self.target_imm_active_callback, 10)
+        self.target_imm_sub = self.create_subscription(Path, '/imm_path', self.target_imm_callback, 10)
+        self.target_imm_active_sub = self.create_subscription(String, '/imm_active', self.target_imm_active_callback, 10)
         
         # 3. Handshake with the Controller
         self.ctrl_status_sub = self.create_subscription(String, '/overtake_status', self.ctrl_status_callback, 10)
