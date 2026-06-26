@@ -24,10 +24,11 @@ class FrenetNode(Node):
         
         # Use ROS2's package share directory instead
         pkg_share = get_package_share_directory('frenet_frame_conv')
-        csv_path = os.path.join(pkg_share, 'centerline_csv', 'spielberg_centerline.csv')
+        csv_path = os.path.join(pkg_share, 'centerline_csv', 'Spielberg_map.csv')
         
         self.centerline = self.load_centerline(csv_path)
         self.arc_lengths = self.compute_arc_lengths(self.centerline)
+        self.get_logger().info(f"Total calculated track arclength: {self.arc_lengths[-1]:.2f}m")
 
         self.get_logger().info(
             f"Loaded {len(self.centerline)} centerline points"
@@ -61,6 +62,7 @@ class FrenetNode(Node):
 
         self.get_logger().info("Frenet node started")
 
+               
     def load_centerline(self, path):
         points = []
         with open(path, "r") as file:
@@ -72,6 +74,9 @@ class FrenetNode(Node):
                     points.append([x, y])
                 except Exception:
                     continue
+        if len(points) > 0 and points[0] != points[-1]:
+            points.append(points[0])
+
         return np.array(points)
 
     def compute_arc_lengths(self, points):
