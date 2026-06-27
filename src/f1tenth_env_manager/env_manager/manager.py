@@ -7,6 +7,10 @@ import csv
 import os
 import math
 from datetime import datetime
+from geometry_msgs.msg import Pose2D
+from std_msgs.msg import Int32
+import numpy as np
+import random
 
 
 class EnvManager(Node):
@@ -39,6 +43,10 @@ class EnvManager(Node):
         self.opp_reset_pub = self.create_publisher(PoseStamped, '/goal_pose', 10)
         self.create_subscription(Odometry, '/ego_racecar/odom', self.ego_odom_cb, 10)
         self.create_subscription(Odometry, '/opp_racecar/odom', self.opp_odom_cb, 10)
+        self.create_subscription(Pose2D, '/ego_racecar/frenet', self.ego_frenet_cb, 10)
+        self.create_subscription(Pose2D, '/opp_racecar/frenet', self.opp_frenet_cb, 10)
+        self.lap_pub = self.create_publisher(Int32, '/env_manager/lap_num', 10)
+
 
         # --- State Variables ---
         self.ego_pose = [0.0, 0.0]
@@ -46,6 +54,14 @@ class EnvManager(Node):
         self.ego_v, self.opp_v = 0.0, 0.0
         self.ego_last_x, self.opp_last_x = 0.0, 0.0
         self.ego_start_time, self.opp_start_time = None, None
+
+        # --- FRENET vars --- 
+        self.ego_frenet_s, self.ego_frenet_d = 0.0, 0.0
+        self.opp_frenet_s, self.opp_frenet_d = 0.0, 0.0
+        self.last_opp_ahead = False  # Track if opp was ahead last check
+        # centerline for frenet->cartesian conversion
+        self.centerline = self._load_centerline()
+        self.arc_lengths = self._compute_arc_lengths()
 
         # --- Racing Metrics ---
         self.ego_laps = 0
@@ -157,6 +173,125 @@ class EnvManager(Node):
             self.current_leader = leader
             self.pending_leader = None
             self.pending_leader_count = 0
+
+    ## frenet
+    def _load_centerline(self):
+        """Load the same centerline that frenet_node uses"""
+        # Adjust path if needed to match your centerline CSV location
+        csv_path = "/sim_ws/src/frenet_frame_conv/centerline_csv/spielberg_centerline.csv"
+        points = []
+        try:
+            with open(csv_path, "r") as file:
+                import csv
+                reader = csv.reader(file)
+                for row in reader:
+                    try:
+                        x = float(row[0])
+                        y = float(row[1])
+                        points.append([x, y])
+                    except:
+                        continue
+            self.get_logger().info(f"Loaded {len(points)} centerline points")
+        except Exception as e:
+            self.get_logger().error(f"Failed to load centerline: {e}")
+            points = [[0, 0]]  # Fallback
+        return np.array(points)
+
+    def _compute_arc_lengths(self):
+        """Compute cumulative arc length along centerline"""
+        s = [0.0]
+        for i in range(1, len(self.centerline)):
+            distance = np.linalg.norm(self.centerline[i] - self.centerline[i - 1])
+            s.append(s[-1] + distance)
+        return np.array(s)
+
+    def _frenet_to_cartesian(self, s, d):
+        """Convert frenet (s, d) to cartesian (x, y)"""
+        # Find the two points on centerline that bracket s
+        idx = np.searchsorted(self.arc_lengths, s)
+        if idx == 0:
+            idx = 1
+        if idx >= len(self.centerline):
+            idx = len(self.centerline) - 1
+        
+        # Interpolate between points
+        s_prev = self.arc_lengths[idx - 1]
+        s_next = self.arc_lengths[idx]
+        if s_next - s_prev < 1e-6:
+            t = 0
+        else:
+            t = (s - s_prev) / (s_next - s_prev)
+        
+        p_prev = self.centerline[idx - 1]
+        p_next = self.centerline[idx]
+        
+        # Point on centerline
+        point_on_line = p_prev + t * (p_next - p_prev)
+        
+        # Perpendicular offset for d
+        tangent = p_next - p_prev
+        tangent_norm = np.linalg.norm(tangent)
+        if tangent_norm > 1e-6:
+            tangent = tangent / tangent_norm
+            normal = np.array([-tangent[1], tangent[0]])  # 90 degree rotation
+            final_point = point_on_line + d * normal
+        else:
+            final_point = point_on_line
+        
+        return float(final_point[0]), float(final_point[1])
+
+
+    def _check_overtake_and_reset(self):
+        """Detect when opponent overtakes ego and reset to new random positions"""
+        # Opponent is ahead if their s is greater
+        opp_ahead_now = self.opp_frenet_s > self.ego_frenet_s
+        
+        # Detect overtake transition (opponent just passed ego)
+        if opp_ahead_now and not self.last_opp_ahead:
+            self.get_logger().info(
+                f"🏁 OVERTAKE DETECTED! Opp s={self.opp_frenet_s:.2f} passed Ego s={self.ego_frenet_s:.2f}"
+            )
+            self._reset_to_random_positions()
+        
+        self.last_opp_ahead = opp_ahead_now
+
+    def _reset_to_random_positions(self):
+        """Reset cars to random positions with ego ahead of opponent"""
+        # Get max arc length
+        max_s = self.arc_lengths[-1]
+        
+        # Random position for opponent (0 to max_s)
+        opp_s = random.uniform(0, max_s)
+        opp_d = 0.0
+        
+        # Ego spawns ahead (3-8 meters ahead on track)
+        separation = random.uniform(3.0, 8.0)
+        ego_s = (opp_s + separation) % max_s  # Wrap around if needed
+        ego_d = random.uniform(-0.3, 0.3)  # Slight lane variation
+        
+        # Convert to cartesian
+        ego_x, ego_y = self._frenet_to_cartesian(ego_s, ego_d)
+        opp_x, opp_y = self._frenet_to_cartesian(opp_s, opp_d)
+        
+        self.get_logger().info(
+            f"Resetting: Ego @ s={ego_s:.1f}, d={ego_d:.2f} | "
+            f"Opp @ s={opp_s:.1f}, d={opp_d:.2f}"
+        )
+        
+        # Publish reset commands
+        ego_msg = PoseWithCovarianceStamped()
+        ego_msg.header.frame_id = 'map'
+        ego_msg.pose.pose.position.x = ego_x
+        ego_msg.pose.pose.position.y = ego_y
+        ego_msg.pose.pose.orientation.w = 1.0
+        self.ego_reset_pub.publish(ego_msg)
+        
+        opp_msg = PoseStamped()
+        opp_msg.header.frame_id = 'map'
+        opp_msg.pose.position.x = opp_x
+        opp_msg.pose.position.y = opp_y
+        opp_msg.pose.orientation.w = 1.0
+        self.opp_reset_pub.publish(opp_msg)
 
     def log_to_csv(self):
         if self.session_finished:
@@ -301,6 +436,9 @@ class EnvManager(Node):
 
             updated_start_time = now
 
+        lap_msg = Int32()
+        lap_msg.data = max(self.ego_laps, self.opp_laps)
+        self.lap_pub.publish(lap_msg)
         return updated_start_time, curr_x
 
     def ego_odom_cb(self, msg):
@@ -320,6 +458,18 @@ class EnvManager(Node):
         self.opp_start_time, self.opp_last_x = self.check_lap_status(
             "OPP", self.opp_pose[0], self.opp_last_x, self.opp_start_time
         )
+
+
+    def ego_frenet_cb(self, msg):
+        self.ego_frenet_s = msg.x
+        self.ego_frenet_d = msg.y
+        
+    def opp_frenet_cb(self, msg):
+        self.opp_frenet_s = msg.x
+        self.opp_frenet_d = msg.y
+        
+        # Check for overtake
+        self._check_overtake_and_reset()
 
 
 def main(args=None):
