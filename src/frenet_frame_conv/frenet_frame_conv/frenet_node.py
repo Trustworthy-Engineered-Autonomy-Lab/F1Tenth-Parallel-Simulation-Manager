@@ -62,23 +62,19 @@ class FrenetNode(Node):
 
         self.get_logger().info("Frenet node started")
 
-               
     def load_centerline(self, path):
         points = []
         with open(path, "r") as file:
             reader = csv.reader(file)
             for row in reader:
-                try:
-                    x = float(row[0])
-                    y = float(row[1])
-                    points.append([x, y])
-                except Exception:
-                    continue
-        if len(points) > 0 and points[0] != points[-1]:
+                if row:
+                    points.append([float(row[0]), float(row[1])])
+        
+        if len(points) > 0 and not np.allclose(points[0], points[-1]):
             points.append(points[0])
 
-        return np.array(points)
-
+        return np.array(points)          
+   
     def compute_arc_lengths(self, points):
         s = [0.0]
         for i in range(1, len(points)):
@@ -157,5 +153,4 @@ def main(args=None):
 
 if __name__ == "__main__":
     main()
-
 
