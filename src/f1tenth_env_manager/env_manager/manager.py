@@ -11,6 +11,8 @@ from geometry_msgs.msg import Pose2D
 from std_msgs.msg import Int32
 import numpy as np
 import random
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
 
 
 class EnvManager(Node):
@@ -243,8 +245,23 @@ class EnvManager(Node):
 
     def _check_overtake_and_reset(self):
         """Detect when opponent overtakes ego and reset to new random positions"""
+        # Skip check until both cars have valid frenet data (not both zero)
+        if (self.ego_frenet_s == 0.0 and self.opp_frenet_s == 0.0):
+            return  # Both zero = not initialized yet
+        
+        # Also skip if values seem invalid (way too large)
+        max_s = self.arc_lengths[-1] if len(self.arc_lengths) > 0 else 400.0
+        if self.ego_frenet_s > max_s + 10 or self.opp_frenet_s > max_s + 10:
+            return
+        
         # Opponent is ahead if their s is greater
         opp_ahead_now = self.opp_frenet_s > self.ego_frenet_s
+        
+        # DEBUG: Log every 2 seconds
+        self.get_logger().info(
+            f"Frenet check: ego_s={self.ego_frenet_s:.1f}, opp_s={self.opp_frenet_s:.1f}, "
+            f"opp_ahead_now={opp_ahead_now}, last={self.last_opp_ahead}"
+        , throttle_duration_sec=2.0)
         
         # Detect overtake transition (opponent just passed ego)
         if opp_ahead_now and not self.last_opp_ahead:
@@ -463,10 +480,12 @@ class EnvManager(Node):
     def ego_frenet_cb(self, msg):
         self.ego_frenet_s = msg.x
         self.ego_frenet_d = msg.y
-        
+        self.get_logger().info(f"EGO frenet received: s={msg.x:.1f}, d={msg.y:.3f}", throttle_duration_sec=3.0)
+
     def opp_frenet_cb(self, msg):
         self.opp_frenet_s = msg.x
         self.opp_frenet_d = msg.y
+        self.get_logger().info(f"OPP frenet received: s={msg.x:.1f}, d={msg.y:.3f}", throttle_duration_sec=3.0)
         
         # Check for overtake
         self._check_overtake_and_reset()

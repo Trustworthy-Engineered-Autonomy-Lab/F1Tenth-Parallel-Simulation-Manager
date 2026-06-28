@@ -91,12 +91,12 @@ ros2 run overtake_controller imm_filter &
 sleep 2
 echo 'Launching Opponent Overtaking Controller...'
 ros2 run overtake_controller overtake &
+sleep 2
+echo 'Launching Frenet Node...'
+ros2 run frenet_frame_conv frenet_node &
 sleep 3
 echo 'Launching Env Manager...'
 SESSION_ID=$SESSION_ID MAX_LAPS=$MAX_LAPS RESULTS_DIR=$RESULTS_DIR ros2 run env_manager main &
-sleep 3
-echo 'Launching Frenet Node...'
-ros2 run frenet_frame_conv frenet_node &
 sleep 3
 echo 'Launching Data Logger...'
 SESSION_ID=$SESSION_ID RESULTS_DIR=$RESULTS_DIR ros2 run data_logger data_logger
