@@ -14,7 +14,35 @@ Once finished, navigate to the **dashboard** to view all screens by clicking `da
 
 In the dashboard, you can click `FULL` to go to that session's full screen view. 
 
-todo changes:
+### Important Commands
+- **Build the simulator (when making any changes or on first install)**
+```powershell
+docker build -t f1tenth_gym_ros .
+```
+
+- **Start all the parallel environments**
+```powershell
+.\start_f1tenth.ps1
+```
+
+- **Check general docker logs**
+```powershell
+docker logs -f f1tenth_session_1
+```
+
+- **Check the tmux panels in the first parallel session**
+
+To get into the container
+```powershell
+docker exec -it f1tenth_session_1 bash
+```
+When in the container (`root@x:/sim_ws#`):
+```bash
+tmux attach -t f1sim_1
+```
+
+
+#### todo changes
 - make rviz fullscreen upon launch
 - make robotmodel for opp show up automatically
 - ensure the data collection works (idt it does rn)
