@@ -7,6 +7,10 @@
 > ```shell
 > docker ps -a -q --filter "name=session" | ForEach-Object { docker rm -f $_ }
 > ```
+> On linux use,
+> ```bash
+> docker kill $(docker ps -q)
+> ```
 
 Run the bash file `.\start_f1tenth.ps1` to start the parallel simulation process. This process can take **a long time to build**, it builds the docker containers and binds their noVNC viewpoints while launching the relevant commands.
 
