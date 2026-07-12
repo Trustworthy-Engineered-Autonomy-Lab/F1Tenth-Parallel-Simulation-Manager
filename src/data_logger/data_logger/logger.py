@@ -10,30 +10,6 @@ from nav_msgs.msg import Path
 from std_msgs.msg import String
 
 
-"""
-Data Logger Node
-Logs all session telemetry to a single CSV per session.
-
-Columns logged per timestep:
-    timestamp, lap,
-    ego_x, ego_y, ego_vel, ego_s, ego_d,
-    opp_x, opp_y, opp_vel, opp_s, opp_d,
-    rel_x, rel_y, rel_vel, rel_s, rel_d,
-    imm_trajectory
-
-Topics subscribed:
-    /env_manager/lap_num        - Int32
-    /ego_racecar/odom           - Odometry
-    /opp_racecar/odom           - Odometry
-    /ego_racecar/frenet         - Float32MultiArray [s, d]   TODO: confirm topic
-    /opp_racecar/frenet         - Float32MultiArray [s, d]   TODO: confirm topic
-    /ego_racecar/imm            - Float32MultiArray          TODO: confirm topic + type
-
-Topics published:
-    /data_logger/overtake_detected  - Bool
-"""
-
-
 class DataLogger(Node):
     def __init__(self):
         super().__init__('data_logger')
@@ -47,8 +23,11 @@ class DataLogger(Node):
         self.data_dir = os.path.join(self.results_dir, "data")
         os.makedirs(self.data_dir, exist_ok=True)
 
-        self.session_csv = os.path.join(self.data_dir, f"session_{self.session_id}_data.csv")
-        self._init_csv()
+        # Iteration tracking
+        self.current_iteration = 1
+        self.current_csv = None
+        self.current_csv_path = None
+        self._start_new_iteration(self.current_iteration)
 
         # State Variables
         self.imm_active = False
@@ -62,16 +41,17 @@ class DataLogger(Node):
         self.opp_vel = 0.0
         self.opp_s, self.opp_d = 0.0, 0.0
 
-        self.imm_trajectory = []  # whatever the IMM publishes
+        self.imm_trajectory = []
 
         # Topics
         ego_odom = '/ego_racecar/odom' if on_sim else 'TODO'
         opp_odom = '/opp_racecar/odom' if on_sim else 'TODO'
-        ego_frenet = '/ego_racecar/frenet'   # TODO: confirm
-        opp_frenet = '/opp_racecar/frenet'   # TODO: confirm
+        ego_frenet = '/ego_racecar/frenet'
+        opp_frenet = '/opp_racecar/frenet'
         imm_path_topic = '/imm_path'
 
         # Subscriptions
+        self.create_subscription(Int32, '/env_manager/iteration_num', self.iteration_num_cb, 10)
         self.create_subscription(Int32, '/env_manager/lap_num', self.lap_num_cb, 10)
         self.create_subscription(Odometry, ego_odom, self.ego_odom_cb, 10)
         self.create_subscription(Odometry, opp_odom, self.opp_odom_cb, 10)
@@ -79,7 +59,6 @@ class DataLogger(Node):
         self.create_subscription(Pose2D, opp_frenet, self.opp_frenet_cb, 10)
         self.create_subscription(Path, imm_path_topic, self.imm_cb, 10)
         self.create_subscription(String, '/imm_active', self.imm_active_cb, 10)
-
 
         # Publisher
         self.overtake_pub = self.create_publisher(Bool, '/data_logger/overtake_detected', 10)
@@ -89,10 +68,11 @@ class DataLogger(Node):
 
         self.get_logger().info(f"DataLogger started | session={self.session_id}")
 
-
-    # file init
-    def _init_csv(self):
-        with open(self.session_csv, 'w', newline='') as f:
+    def _start_new_iteration(self, iteration_num):
+        """Create a new CSV file for the given iteration number"""
+        self.current_csv_path = os.path.join(self.data_dir, f"iteration_{iteration_num}.csv")
+        
+        with open(self.current_csv_path, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
                 'timestamp', 'lap',
@@ -101,8 +81,18 @@ class DataLogger(Node):
                 'rel_x', 'rel_y', 'rel_vel', 'rel_s', 'rel_d',
                 'imm_trajectory', 'imm_active'
             ])
+        
+        self.get_logger().info(f"📝 Created new CSV: iteration_{iteration_num}.csv")
 
-    # subscriber callbacks
+    # Subscriber callbacks
+    def iteration_num_cb(self, msg):
+        """Handle iteration number updates - create new CSV when iteration changes"""
+        new_iteration = msg.data
+        
+        if new_iteration != self.current_iteration:
+            self.get_logger().info(f"🔄 Iteration changed: {self.current_iteration} → {new_iteration}")
+            self.current_iteration = new_iteration
+            self._start_new_iteration(self.current_iteration)
 
     def imm_active_cb(self, msg):
         self.imm_active = (msg.data == "True")
@@ -121,22 +111,22 @@ class DataLogger(Node):
         self.opp_vel = msg.twist.twist.linear.x
 
     def ego_frenet_cb(self, msg):
-        self.ego_s = msg.x  # s is in .x
-        self.ego_d = msg.y  # d is in .y
+        self.ego_s = msg.x
+        self.ego_d = msg.y
 
     def opp_frenet_cb(self, msg):
-        self.opp_s = msg.x  # s is in .x
-        self.opp_d = msg.y  # d is in .y
+        self.opp_s = msg.x
+        self.opp_d = msg.y
 
     def imm_cb(self, msg):
-        # msg.poses is a list of PoseStamped
-        # Extract the predicted waypoints
         waypoints = [(pose.pose.position.x, pose.pose.position.y) for pose in msg.poses]
         self.imm_trajectory = waypoints
 
-
     # Timer: write combined row
     def log_to_csv(self):
+        if self.current_csv_path is None:
+            return
+
         timestamp = self.get_clock().now().nanoseconds / 1e9
 
         rel_x = self.opp_x - self.ego_x
@@ -145,7 +135,7 @@ class DataLogger(Node):
         rel_s = self.opp_s - self.ego_s
         rel_d = self.opp_d - self.ego_d
 
-        with open(self.session_csv, 'a', newline='') as f:
+        with open(self.current_csv_path, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
                 timestamp, self.lap_num,

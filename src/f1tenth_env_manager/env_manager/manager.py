@@ -17,7 +17,6 @@ class EnvManager(Node):
         super().__init__('env_manager')
 
         self.session_id = os.getenv("SESSION_ID", "1")
-        self.max_laps = int(os.getenv("MAX_LAPS", "3"))
         self.results_dir = os.getenv("RESULTS_DIR", f"/sim_ws/results/session_{self.session_id}")
         os.makedirs(self.results_dir, exist_ok=True)
 
@@ -28,13 +27,13 @@ class EnvManager(Node):
         self.create_subscription(Odometry, '/opp_racecar/odom', self.opp_odom_cb, 10)
         self.create_subscription(Pose2D, '/ego_racecar/frenet', self.ego_frenet_cb, 10)
         self.create_subscription(Pose2D, '/opp_racecar/frenet', self.opp_frenet_cb, 10)
-        self.lap_pub = self.create_publisher(Int32, '/env_manager/lap_num', 10)
+        
+        # New Iteration Publisher
+        self.iteration_pub = self.create_publisher(Int32, '/env_manager/iteration_num', 10)
 
         # State Variables
         self.ego_pose = [0.0, 0.0]
         self.opp_pose = [0.0, 0.0]
-        self.ego_last_x, self.opp_last_x = 0.0, 0.0
-        self.ego_start_time, self.opp_start_time = None, None
 
         # Frenet vars
         self.ego_frenet_s, self.ego_frenet_d = 0.0, 0.0
@@ -43,16 +42,15 @@ class EnvManager(Node):
         self.centerline = self._load_centerline()
         self.arc_lengths = self._compute_arc_lengths()
 
-        # Lap tracking
-        self.ego_laps = 0
-        self.opp_laps = 0
+        # Iteration tracking
+        self.iteration_num = 1
         self.session_finished = False
         
         # Reset tracking
         self.last_reset_time = 0.0
         self.log_counter = 0
 
-        self.get_logger().info(f"Env Manager (Reset Only) | SESSION_ID={self.session_id}")
+        self.get_logger().info(f"Env Manager (Iteration Tracking) | SESSION_ID={self.session_id}")
 
     def _load_centerline(self):
         """Load the same centerline that frenet_node uses"""
@@ -189,34 +187,22 @@ class EnvManager(Node):
 
         self.last_reset_time = self.get_clock().now().nanoseconds / 1e9
         self.last_opp_ahead = False
+        
+        # --- INCREMENT ITERATION HERE ---
+        self.iteration_num += 1
+        self.get_logger().info(f"🔄 Starting Iteration {self.iteration_num}")
 
-    def check_lap_status(self, car_label, curr_x, last_x, start_time):
-        if last_x < 0 and curr_x >= 0:
-            now = self.get_clock().now().nanoseconds / 1e9
-            if start_time:
-                if car_label == "EGO":
-                    self.ego_laps += 1
-                else:
-                    self.opp_laps += 1
-                self.get_logger().info(f"{car_label} finished lap!")
-            start_time = now
-
-        lap_msg = Int32()
-        lap_msg.data = max(self.ego_laps, self.opp_laps)
-        self.lap_pub.publish(lap_msg)
-        return start_time, curr_x
 
     def ego_odom_cb(self, msg):
         self.ego_pose = [msg.pose.pose.position.x, msg.pose.pose.position.y]
-        self.ego_start_time, self.ego_last_x = self.check_lap_status(
-            "EGO", self.ego_pose[0], self.ego_last_x, self.ego_start_time
-        )
+        
+        # Publish the iteration number constantly so data loggers stay synced
+        iter_msg = Int32()
+        iter_msg.data = self.iteration_num
+        self.iteration_pub.publish(iter_msg)
 
     def opp_odom_cb(self, msg):
         self.opp_pose = [msg.pose.pose.position.x, msg.pose.pose.position.y]
-        self.opp_start_time, self.opp_last_x = self.check_lap_status(
-            "OPP", self.opp_pose[0], self.opp_last_x, self.opp_start_time
-        )
 
     def ego_frenet_cb(self, msg):
         self.ego_frenet_s = msg.x
