@@ -20,6 +20,9 @@ docker build -t f1tenth_gym_ros .
 ```
 > On linux use `start_f1tenth.sh`
 
+>[!IMPORTANT]
+>If the Rviz terminal does **not** launch, make sure that the `auto_run_sim.sh` is **LF** and not **CRLF** (change it and rebuild)
+
 - **Check general docker logs**
 ```powershell
 docker logs -f f1tenth_session_1
