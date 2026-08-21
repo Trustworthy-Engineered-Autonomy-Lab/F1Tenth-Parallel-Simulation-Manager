@@ -44,7 +44,7 @@ class DataLogger(Node):
         self.overtake_num = 0  # Starts at 0, increments on each overtake
         self.last_opp_ahead = False
         self.last_overtake_time = 0.0
-        self.max_track_length = 400.0  # Default track length
+        self.max_track_length = 359.85  # Default track length
 
         # Topics
         ego_odom = '/ego_racecar/odom' if on_sim else 'TODO'
@@ -82,50 +82,49 @@ class DataLogger(Node):
                 'imm_trajectory', 'imm_active'
             ])
 
-    def _check_overtake(self):
-        """Detect overtakes and increment overtake_num"""
-        now = self.get_clock().now().nanoseconds / 1e9
-        
-        # Cooldown to prevent counting same overtake multiple times (1 second buffer)
-        if (now - self.last_overtake_time) < 1.0:
+    def _detect_and_increment_overtake(self) -> None:
+        """
+        Increments ``self.overtake_num`` exactly when the opponent car
+        goes from behind to ahead of the ego car.
+        """
+
+        # guard against stale data
+        if self.ego_s == 0.0 or self.opp_s == 0.0:
             return
 
-        # Skip if no data yet
-        if (self.ego_s == 0.0 and self.opp_s == 0.0):
-            return 
-        
-        # Calculate relative position accounting for track wraparound
+        # raw relative distance (opponent – ego)
+        delta = self.opp_s - self.ego_s
+
+        # wrap‑around to keep the difference in [‑L/2 , +L/2]
         max_s = self.max_track_length
-        if self.ego_s > max_s + 10 or self.opp_s > max_s + 10:
-            return
-        
-        s_diff = self.opp_s - self.ego_s
-        
-        # Handle wraparound
-        if s_diff > max_s / 2.0:
-            s_diff -= max_s
-        elif s_diff < -max_s / 2.0:
-            s_diff += max_s
-            
-        opp_ahead_now = s_diff > 0
-        
-        # REDUCED THRESHOLD: 1.0m (change to 0.5 if you want even more sensitive)
-        OVERTAKE_THRESHOLD = 1.0
-        
-        # Detect completed overtake: opponent just went ahead by sufficient distance
-        if opp_ahead_now and not self.last_opp_ahead and s_diff >= OVERTAKE_THRESHOLD:
+        if delta >  max_s / 2.0:
+            delta -= max_s           # opponent wrapped past 0
+        elif delta < -max_s / 2.0:
+            delta += max_s           # ego wrapped past 0
+
+        # who is ahead *after* we fixed wrap‑around?
+        opp_ahead_now = delta > 0.0   # True if opponent is ahead
+
+        # DEBUG – you can delete this line in production
+        print(f"[DEBUG] ego_s={self.ego_s:.2f}  opp_s={self.opp_s:.2f}  "
+              f"delta={delta:.2f}  opp_ahead_now={opp_ahead_now}  "
+              f"last_opp_ahead={self.last_opp_ahead}")
+
+        # crossing test: from behind (False) → ahead (True)
+        if opp_ahead_now and not self.last_opp_ahead:
             self.overtake_num += 1
-            self.last_overtake_time = now
-            
+
+            # log the event – appears in *rosout*
             self.get_logger().info(
-                f"🏁 OVERTAKE #{self.overtake_num} DETECTED! Opp is {s_diff:.1f}m ahead"
+                f"🏁 OVERTAKE #{self.overtake_num} DETECTED! Opp is {delta:.1f} m ahead"
             )
-            
-            # Publish overtake event
+
+            # publish a Bool so other nodes can react
             msg = Bool()
             msg.data = True
             self.overtake_pub.publish(msg)
-        
+
+        # update the state flag for the next callback
         self.last_opp_ahead = opp_ahead_now
 
     # Subscriber callbacks
@@ -154,7 +153,7 @@ class DataLogger(Node):
         self.opp_d = msg.y
         
         # Check for overtakes whenever opponent position updates
-        self._check_overtake()
+        self._detect_and_increment_overtake()
 
     def imm_cb(self, msg):
         waypoints = [(pose.pose.position.x, pose.pose.position.y) for pose in msg.poses]
@@ -162,22 +161,37 @@ class DataLogger(Node):
 
     # Timer: write to single CSV
     def log_to_csv(self):
-        timestamp = self.get_clock().now().nanoseconds / 1e9
+        # Snapshot all values atomically to prevent mid-update writes
+        timestamp   = self.get_clock().now().nanoseconds / 1e9
+        lap         = self.lap_num
+        overtake    = self.overtake_num
+        ego_x       = self.ego_x
+        ego_y       = self.ego_y
+        ego_vel     = self.ego_vel
+        ego_s       = self.ego_s
+        ego_d       = self.ego_d
+        opp_x       = self.opp_x
+        opp_y       = self.opp_y
+        opp_vel     = self.opp_vel
+        opp_s       = self.opp_s
+        opp_d       = self.opp_d
+        imm_traj    = list(self.imm_trajectory)
+        imm_active  = self.imm_active
 
-        rel_x = self.opp_x - self.ego_x
-        rel_y = self.opp_y - self.ego_y
-        rel_vel = self.opp_vel - self.ego_vel
-        rel_s = self.opp_s - self.ego_s
-        rel_d = self.opp_d - self.ego_d
+        rel_x   = opp_x - ego_x
+        rel_y   = opp_y - ego_y
+        rel_vel = opp_vel - ego_vel
+        rel_s   = opp_s - ego_s
+        rel_d   = opp_d - ego_d
 
         with open(self.session_csv, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
-                timestamp, self.lap_num, self.overtake_num,
-                self.ego_x, self.ego_y, self.ego_vel, self.ego_s, self.ego_d,
-                self.opp_x, self.opp_y, self.opp_vel, self.opp_s, self.opp_d,
+                timestamp, lap, overtake,
+                ego_x, ego_y, ego_vel, ego_s, ego_d,
+                opp_x, opp_y, opp_vel, opp_s, opp_d,
                 rel_x, rel_y, rel_vel, rel_s, rel_d,
-                self.imm_trajectory, self.imm_active
+                imm_traj, imm_active
             ])
 
     # publisher
