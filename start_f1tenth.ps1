@@ -25,6 +25,12 @@ for ($i = 1; $i -le $NumSessions; $i++) {
     $sessionResults = Join-Path $resultsRoot "session_$i"
     New-Item -ItemType Directory -Force -Path $sessionResults | Out-Null
 
+    # Copy overtake settings to results
+    $configSource = Join-Path $repoRoot "config" "opp_overtake_settings.yaml"
+    $configDest = Join-Path $sessionResults "opp_overtake_settings.yaml"
+    Copy-Item -Path $configSource -Destination $configDest -Force
+    Write-Host "Copied overtake settings to $sessionResults"
+
     Write-Host "Starting Session $i..."
 
     # remove old containers

@@ -21,6 +21,11 @@ for i in $(seq 1 "$NUM_SESSIONS"); do
   SESSION_RESULTS="$RESULTS_ROOT/session_$i"
 
   mkdir -p "$SESSION_RESULTS"
+
+  # Copy overtake settings to results
+  cp "$REPO_ROOT/config/opp_overtake_settings.yaml" "$SESSION_RESULTS/opp_overtake_settings.yaml"
+  echo "Copied overtake settings to $SESSION_RESULTS"
+
   docker rm -f "$NOVNC_NAME" "$CONTAINER_NAME" 2>/dev/null || true
 
   docker run -d \

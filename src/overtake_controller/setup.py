@@ -21,8 +21,13 @@ setup(
         'console_scripts': [
             'imm_filter = overtake_controller.imm_filterpy:main',
             'interceptor = overtake_controller.interceptor:main',
-            'overtake = overtake_controller.overtake:main',
             'ego_ftg = overtake_controller.ego_ftg:main',
+            ### Overtake implementations
+            'overtake = overtake_controller.overtake:main',
+            'overtake_aggressive = overtake_controller.overtake_aggressive:main',
+            'overtake_right = overtake_controller.overtake_right:main',
+            'overtake_left = overtake_controller.overtake_left:main',
+            'overtake_conservative = overtake_controller.overtake_conservative:main',
         ],
     },
 )

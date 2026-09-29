@@ -62,7 +62,19 @@ colcon build --symlink-install
 # Final source to ensure the environment knows about the new build
 source install/local_setup.bash
 
-# --- 4. tmux Orchestration ---
+# --- read overtake controller node from config ---
+PERSONALITY=$(python3 -c "
+import yaml
+with open('$WS_DIR/config/opp_overtake_settings.yaml', 'r') as f:
+    config = yaml.safe_load(f)
+    session_key = f'session_{$SESSION_ID}'
+    if session_key in config['overtake_profiles']:
+        print(config['overtake_profiles'][session_key]['controller_node'])
+    else:
+        print('overtake')  # default fallback
+")
+
+# --- tmux Orchestration ---
 echo "Initializing tmux session: $TMUX_SESSION"
 tmux has-session -t "$TMUX_SESSION" 2>/dev/null && tmux kill-session -t "$TMUX_SESSION"
 tmux new-session -d -s "$TMUX_SESSION"
@@ -89,8 +101,8 @@ sleep 2
 echo 'Launching IMM Filter (for opponent)...'
 ros2 run overtake_controller imm_filter &
 sleep 2
-echo 'Launching Opponent Overtaking Controller...'
-ros2 run overtake_controller overtake &
+echo 'Launching Opponent Overtaking Controller ($PERSONALITY)...'
+ros2 run overtake_controller $PERSONALITY &
 sleep 2
 echo 'Launching Frenet Node...'
 ros2 run frenet_frame_conv frenet_node &
