@@ -36,8 +36,8 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update --fix-missing && \
                        ros-foxy-pcl-ros \
                        ros-foxy-sensor-msgs-py
 RUN apt-get -y dist-upgrade
-RUN pip3 install transforms3d filterpy scikit-learn
-
+RUN pip3 install transforms3d filterpy scikit-learn \
+    "numpy<2" "pandas==1.5.3"
 # f1tenth gym
 RUN git clone https://github.com/f1tenth/f1tenth_gym
 RUN cd f1tenth_gym && \
