@@ -3,10 +3,16 @@ param(
     [int]$MaxLaps = 3
 )
 
+if (-not (Get-Module -ListAvailable -Name powershell-yaml)) {
+    Write-Host "Installing powershell-yaml..."
+    Install-Module -Name powershell-yaml -Force -Scope CurrentUser
+}
+Import-Module powershell-yaml
+
 $imageName = "f1tenth_gym_ros"
 $repoRoot = (Get-Location).Path
 $resultsRoot = Join-Path $repoRoot "results"
-$configFile = Join-Path $repoRoot "config" "manager.yaml"
+$configFile = Join-Path (Join-Path $repoRoot "config") "manager.yaml"
 
 # Default values
 $numSimulations = 3
@@ -55,7 +61,7 @@ for ($i = 1; $i -le $NumSessions; $i++) {
     New-Item -ItemType Directory -Force -Path $sessionResults | Out-Null
 
     # Copy overtake settings to results
-    $configSource = Join-Path $repoRoot "config" "opp_overtake_settings.yaml"
+    $configSource = Join-Path (Join-Path $repoRoot "config") "opp_overtake_settings.yaml"
     $configDest = Join-Path $sessionResults "opp_overtake_settings.yaml"
     Copy-Item -Path $configSource -Destination $configDest -Force
     Write-Host "Copied overtake settings to $sessionResults"

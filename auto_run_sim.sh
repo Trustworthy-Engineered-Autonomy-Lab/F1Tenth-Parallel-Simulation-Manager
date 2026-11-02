@@ -58,7 +58,7 @@ source install/local_setup.bash
 # --- Read overtake controller node from config ---
 PERSONALITY=$(python3 -c "
 import yaml
-with open('$WS_DIR/config/opp_overtake_settings.yaml', 'r') as f:
+with open('$RESULTS_DIR/opp_overtake_settings.yaml', 'r') as f:
     config = yaml.safe_load(f)
     session_key = f'session_{$SESSION_ID}'
     if session_key in config['overtake_profiles']:
