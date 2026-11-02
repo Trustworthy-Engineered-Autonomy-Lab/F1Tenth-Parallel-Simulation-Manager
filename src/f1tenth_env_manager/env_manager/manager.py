@@ -164,6 +164,15 @@ class EnvManager(Node):
         msg.data = self.total_lap_count
         self.lap_pub.publish(msg)
 
+        # HARD STOP: max_laps_total reached
+        if self.total_lap_count >= self.max_laps_total:
+            self.get_logger().warn(
+                f"⏹️  MAX_LAPS ({self.max_laps_total}) reached. "
+                f"Completed {self.current_sim}/{self.num_simulations} simulations."
+            )
+            self._trigger_shutdown()
+            return
+
         # Check for reset conditions
         if not self.overtake_occurred:
             self.laps_without_overtake += 1
@@ -177,14 +186,6 @@ class EnvManager(Node):
         else:
             self.laps_without_overtake = 0
             self.overtake_occurred = False
-
-        # HARD STOP: max_laps_total reached
-        if self.total_lap_count >= self.max_laps_total:
-            self.get_logger().warn(
-                f"⏹️  MAX_LAPS ({self.max_laps_total}) reached. "
-                f"Completed {self.current_sim}/{self.num_simulations} simulations."
-            )
-            self._trigger_shutdown()
 
     def _check_overtake_distance(self):
         """Verify overtake has sufficient margin"""
@@ -230,6 +231,8 @@ class EnvManager(Node):
     def _trigger_shutdown(self):
         """Gracefully shutdown the session"""
         self.get_logger().info("📤 Triggering session shutdown...")
+        import time
+        time.sleep(2.0)
         msg = Bool()
         msg.data = True
         self.shutdown_pub.publish(msg)

@@ -9,6 +9,8 @@ CONFIG_FILE="$REPO_ROOT/config/manager.yaml"
 # default values if the YAML keys are missing
 DEFAULT_SESSIONS=3
 DEFAULT_LAPS=3
+DEFAULT_SIMULATIONS=3
+DEFAULT_OVERTAKE_MARGIN=3.0
 
 # Read the YAML, falling back on the defaults
 if [[ -f "$CONFIG_FILE" ]]; then
