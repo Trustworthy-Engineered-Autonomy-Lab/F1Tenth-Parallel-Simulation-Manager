@@ -1,10 +1,13 @@
 param(
+    [ValidateRange(1, 100)]
     [int]$NumSessions = 3,
     [int]$MaxLaps = 3
 )
 
 $imageName = "f1tenth_gym_ros"
-$repoRoot = (Get-Location).Path
+$ErrorActionPreference = 'Stop'
+$repoRoot = $PSScriptRoot
+Set-Location -LiteralPath $repoRoot
 $resultsRoot = Join-Path $repoRoot "results"
 
 Write-Host "[1/4] Creating results root..."
@@ -12,10 +15,12 @@ New-Item -ItemType Directory -Force -Path $resultsRoot | Out-Null
 
 Write-Host "[2/4] Building Docker image..."
 docker build -t $imageName .
+if ($LASTEXITCODE -ne 0) { throw 'Docker build failed; no sessions were started.' }
 
 Write-Host "[3/4] Removing old session containers if they exist..."
 # combine with loop below
-docker rm -f $(docker ps -aq --filter "name=f1tenth_session_") 2>$null
+$oldSessions = @(docker ps -aq --filter "name=f1tenth_session_")
+if ($oldSessions.Count -gt 0) { docker rm -f @oldSessions | Out-Null }
 
 Write-Host "[4/4] Launching $NumSessions parallel simulation containers..."
 for ($i = 1; $i -le $NumSessions; $i++) {
@@ -34,14 +39,15 @@ for ($i = 1; $i -le $NumSessions; $i++) {
     Write-Host "Starting Session $i..."
 
     # remove old containers
-    docker rm -f $novncName 2>$null | Out-Null
-    docker rm -f $containerName 2>$null | Out-Null
+    $oldVnc = @(docker ps -aq --filter "name=^/${novncName}$")
+    if ($oldVnc.Count -gt 0) { docker rm -f @oldVnc | Out-Null }
 
     # launch no vnc with the according port address for the session id#
     docker run -d `
         --name $novncName `
         -p "${vncPort}:8080" `
         theasp/novnc:latest
+    if ($LASTEXITCODE -ne 0) { throw "Failed to start $novncName" }
 
     # launch the sim
     # get unique identifiers and domains for each
@@ -61,6 +67,7 @@ for ($i = 1; $i -le $NumSessions; $i++) {
         -v "${sessionResults}:/sim_ws/results/session_$i" `
         $imageName `
         $containerCmd
+    if ($LASTEXITCODE -ne 0) { throw "Failed to start $containerName" }
 }
 
 Write-Host ""

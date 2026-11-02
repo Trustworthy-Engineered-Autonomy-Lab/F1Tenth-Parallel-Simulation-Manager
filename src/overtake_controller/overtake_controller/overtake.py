@@ -8,10 +8,12 @@ from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Path, Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
 from std_msgs.msg import String
+from overtake_controller.track_following import RacelineFollower
 
 class OpponentOvertakeController(Node):
     def __init__(self):
         super().__init__('opponent_overtake_controller')
+        self.raceline_follower = RacelineFollower()
         
         # Subscriptions
         self.scan_sub = self.create_subscription(LaserScan, '/opp_scan', self.scan_callback, 10)
@@ -141,9 +143,18 @@ class OpponentOvertakeController(Node):
             
             self.heartbeat_counter += 1
             if self.heartbeat_counter % 40 == 0:
-                self.get_logger().info("⏳ FTG Mode Active. Awaiting new spline from Planner...", throttle_duration_sec=2.0)
+                self.get_logger().info("FTG Mode Active. Awaiting new spline from Planner...", throttle_duration_sec=2.0)
                 
-            steering, speed = self.ftg_control_post_perception()
+            steering, speed = self.raceline_follower.control(
+                self.opp_x, self.opp_y, self.opp_yaw, self.wheelbase, self.MAX_SPEED)
+
+        # Keep following distance when the defender enters our lane, including
+        # while a committed passing spline is being replaced by the planner.
+        dx, dy = self.ego_x - self.opp_x, self.ego_y - self.opp_y
+        forward = dx * math.cos(self.opp_yaw) + dy * math.sin(self.opp_yaw)
+        lateral = -dx * math.sin(self.opp_yaw) + dy * math.cos(self.opp_yaw)
+        if 0.0 < forward < 2.5 and abs(lateral) < 0.55:
+            speed = min(speed, max(0.0, self.ego_speed + 0.8 * (forward - 1.5)))
 
         # Final limits and rate clamping
         steering = self.rate_limit_steering(steering)
@@ -167,7 +178,10 @@ class OpponentOvertakeController(Node):
                 
         steer_factor = 1.0 - min(1.0, abs(self.prev_steer) / self.MAX_STEER_ANGLE)
         dynamic_lookahead = 0.5 + (self.lookahead_distance - 0.5) * steer_factor
-        lookahead_idx = min(closest_idx + int(dynamic_lookahead / 0.1), len(tracking_spline) - 1)
+        # Spline spacing varies with the gap; accumulate real metres.
+        xy = np.array([[p.pose.position.x, p.pose.position.y] for p in tracking_spline])
+        arc = np.concatenate(([0.0], np.cumsum(np.linalg.norm(np.diff(xy[closest_idx:], axis=0), axis=1))))
+        lookahead_idx = min(closest_idx + int(np.searchsorted(arc, dynamic_lookahead)), len(tracking_spline) - 1)
         
         target = tracking_spline[lookahead_idx].pose.position
         dx, dy = target.x - self.opp_x, target.y - self.opp_y

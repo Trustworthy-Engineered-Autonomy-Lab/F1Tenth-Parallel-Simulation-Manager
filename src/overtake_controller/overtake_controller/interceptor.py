@@ -8,10 +8,14 @@ from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker
 from std_msgs.msg import String
+from scipy.interpolate import splev
+from racetrack_utilities.racetrack_utilities import RacetrackUtilities
 
 class OvertakeInterceptorNode(Node):
     def __init__(self):
         super().__init__('overtake_interceptor')
+        self.declare_parameter('racetrack_csv', '/sim_ws/src/lidar_processing/scripts/Spielberg_map.csv')
+        self.track = RacetrackUtilities(self.get_parameter('racetrack_csv').value)
         
         # Subscriptions
         self.ego_odom_sub = self.create_subscription(Odometry, '/ego_racecar/odom', self.ego_odom_callback, 10)
@@ -42,12 +46,15 @@ class OvertakeInterceptorNode(Node):
         # Overtake parameters
         self.car_width = 0.30
         # FIX 1: Reduced from 1.0 to 0.85 to keep spline tighter to racing line
-        self.lateral_clearance = 0.85
+        self.lateral_clearance = 0.60
         self.overtake_distance = 6.0
         self.path_resolution = 50
         
         # Distance window
-        self.max_display_distance = 3.5
+        # Start planning while there is still room to change lanes. The default
+        # spawn gap is about 4.4 m, outside the old 3.5 m trigger window.
+        self.declare_parameter('trigger_distance', 6.0)
+        self.max_display_distance = self.get_parameter('trigger_distance').value
         self.min_ego_distance = 0.0
         
         # State machine
@@ -75,15 +82,15 @@ class OvertakeInterceptorNode(Node):
     def opp_odom_callback(self, msg):
         self.opp_yaw = self.quat_to_yaw(msg.pose.pose.orientation)
         self.opp_speed = math.hypot(msg.twist.twist.linear.x, msg.twist.twist.linear.y)
-        if not self.imm_data_received:
-            self.opp_x = msg.pose.pose.position.x
-            self.opp_y = msg.pose.pose.position.y
+        # The overtaker's own pose must always come from its own odometry.
+        self.opp_x = msg.pose.pose.position.x
+        self.opp_y = msg.pose.pose.position.y
         self.opp_data_received = True
 
     def imm_path_callback(self, msg):
         if len(msg.poses) > 0:
-            self.opp_x = msg.poses[0].pose.position.x
-            self.opp_y = msg.poses[0].pose.position.y
+            # /imm_path predicts the defending ego, not the overtaking opponent.
+            self.predicted_ego_path = msg.poses
             self.imm_data_received = True
 
     def scan_callback(self, msg):
@@ -103,9 +110,20 @@ class OvertakeInterceptorNode(Node):
             return
 
         if self.locked_spline is not None:
-            self.publish_path(self.locked_spline)
-            self.set_mode("OVERTAKE_ACTIVE")
-            return
+            closest = int(np.argmin(np.linalg.norm(
+                self.locked_spline - [self.opp_x, self.opp_y], axis=1)))
+            if closest >= len(self.locked_spline) - 3:
+                self.locked_spline = None
+                self.publish_empty_path()
+                self.set_mode('FTG')
+                return
+            # A defender can move into a previously clear lane. Revalidate the
+            # remaining path instead of freezing it through that new obstacle.
+            if self.validate_and_clip_path(self.locked_spline[closest:]) is not None:
+                self.publish_path(self.locked_spline)
+                self.set_mode("OVERTAKE_ACTIVE")
+                return
+            self.locked_spline = None
 
         ego_pos = np.array([self.ego_x, self.ego_y])
         opp_pos = np.array([self.opp_x, self.opp_y])
@@ -163,60 +181,60 @@ class OvertakeInterceptorNode(Node):
         return None
 
     def try_generate_spline(self, side):
-        opp_pos = np.array([self.opp_x, self.opp_y])
-        ego_pos = np.array([self.ego_x, self.ego_y])
-        opp_forward = np.array([math.cos(self.opp_yaw), math.sin(self.opp_yaw)])
-        ego_forward = np.array([math.cos(self.ego_yaw), math.sin(self.ego_yaw)])
-
-        if side == "left":
-            lateral_dir = np.array([-ego_forward[1], ego_forward[0]])
-        else:
-            lateral_dir = np.array([ego_forward[1], -ego_forward[0]])
-
-        adaptive_distance = min(self.overtake_distance, 8.0)
-        end_point = ego_pos + adaptive_distance * ego_forward + self.lateral_clearance * lateral_dir
-        
-        dist_to_ego = np.linalg.norm(ego_pos - opp_pos)
-        dist_total = np.linalg.norm(end_point - opp_pos)
-        if dist_total < 0.5:
-            return None
-
-        P0 = opp_pos
-        P1 = opp_pos + (dist_to_ego * 0.2) * opp_forward
-        P3 = end_point
-        P2 = P3 - (self.overtake_distance * 0.8) * ego_forward
-
-        path_points = []
-        t_values = np.linspace(0, 1, self.path_resolution)
-        for t in t_values:
-            point = ((1 - t)**3) * P0 + \
-                    3 * ((1 - t)**2) * t * P1 + \
-                    3 * (1 - t) * (t**2) * P2 + \
-                    (t**3) * P3
-            path_points.append(point)
-
-        return self.validate_and_clip_path(path_points)
+        # Plan along the track, rather than extending a straight Bezier beyond
+        # the next corner. Both cars are localized in the same Frenet frame.
+        s_opp, d_opp = self.track.convert_to_frenet(self.opp_x, self.opp_y)
+        s_ego, d_ego = self.track.convert_to_frenet(self.ego_x, self.ego_y)
+        s_ego = self.track.unwrap_s(s_ego, s_opp)
+        gap = s_ego - s_opp
+        lane_d = d_ego + (self.lateral_clearance if side == 'left' else -self.lateral_clearance)
+        distance = np.clip(gap + self.overtake_distance, 6.0, 12.0)
+        s = np.linspace(s_opp, s_opp + distance, self.path_resolution)
+        # Complete the lane change before reaching the defending car.
+        u = np.clip((s - s_opp) / max(2.2, gap * 0.7), 0.0, 1.0)
+        blend = u * u * (3.0 - 2.0 * u)
+        d = d_opp + (lane_d - d_opp) * blend
+        path = self.track.convert_to_cartesian_arr(s, d)
+        return self.validate_and_clip_path(path)
 
     def validate_and_clip_path(self, path_points):
-        if len(self.scan_ranges) == 0:
-            return path_points
-
-        for pt in path_points:
-            dx = pt[0] - self.opp_x
-            dy = pt[1] - self.opp_y
-            dist = math.hypot(dx, dy)
-            
-            local_angle = math.atan2(dy, dx) - self.opp_yaw
-            local_angle = (local_angle + math.pi) % (2 * math.pi) - math.pi
-            
-            idx = int(round((local_angle - self.scan_angle_min) / max(self.scan_angle_inc, 1e-6)))
-            if 0 <= idx < len(self.scan_ranges):
-                r = self.scan_ranges[idx]
-                # FIX 2: Increased safety margin from 0.15 to 0.45 to prevent wall crashes!
-                # This forces the planner to take the INSIDE line when the outside is blocked
-                if math.isfinite(r) and r > 0.1 and dist > (r - self.car_width - 0.45):
+        path = np.asarray(path_points, dtype=float)
+        if len(path) < 2 or not np.isfinite(path).all():
+            return None
+        # Check all four footprint corners against the known simulator track.
+        # A laser return on the ego also occludes valid road beyond it; treating
+        # that whole radial shadow as a wall used to reject usable passing lanes.
+        tangent = np.gradient(path, axis=0)
+        tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-9)
+        normal = np.column_stack([-tangent[:, 1], tangent[:, 0]])
+        heading = np.unwrap(np.arctan2(tangent[:, 1], tangent[:, 0]))
+        arc_steps = np.linalg.norm(np.diff(path, axis=0), axis=1)
+        if np.any(np.abs(np.diff(heading)) / np.maximum(arc_steps, 1e-6) > 1.2):
+            return None
+        for front in (-1.0, 1.0):
+            for left in (-1.0, 1.0):
+                corners = path + front * 0.29 * tangent + left * 0.155 * normal
+                sd = self.track.convert_to_frenet_arr(corners)
+                lw, rw = splev(sd[:, 0] / self.track.arclength, self.track.racetrack_widths_spline)
+                if np.any(sd[:, 1] > np.asarray(lw) - 0.03) or np.any(sd[:, 1] < -np.asarray(rw) + 0.03):
                     return None
-        return np.array(path_points)
+        # Check the moving defender at the time the overtaker reaches each
+        # point, including its current lateral motion (bounded to one second).
+        own_s, _ = self.track.convert_to_frenet(self.opp_x, self.opp_y)
+        ego_s, ego_d = self.track.convert_to_frenet(self.ego_x, self.ego_y)
+        ego_s = self.track.unwrap_s(ego_s, own_s)
+        sd = self.track.convert_to_frenet_arr(path)
+        path_s = self.track.unwrap_s(sd[:, 0], own_s)
+        distance = np.concatenate(([0.0], np.cumsum(np.linalg.norm(np.diff(path, axis=0), axis=1))))
+        times = distance / 2.34
+        tx, ty = splev((ego_s % self.track.arclength) / self.track.arclength,
+                       self.track.centerline_spline, der=1)
+        lateral_speed = self.ego_speed * math.sin(self.ego_yaw - math.atan2(ty, tx))
+        predicted_s = ego_s + self.ego_speed * times
+        predicted_d = ego_d + lateral_speed * np.minimum(times, 1.0)
+        if np.any((np.abs(path_s - predicted_s) < 0.75) & (np.abs(sd[:, 1] - predicted_d) < 0.45)):
+            return None
+        return path
 
     def publish_path(self, path_points):
         path_msg = Path()

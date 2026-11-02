@@ -43,14 +43,21 @@ RUN git clone https://github.com/f1tenth/f1tenth_gym
 RUN cd f1tenth_gym && \
     pip3 install -e .
 
+# The defensive trajectory generator imports make_smoothing_spline (SciPy 1.10).
+# Foxy's Ubuntu packages provide an older SciPy; keep Python 3.8-compatible wheels.
+RUN pip3 install "scipy==1.10.1"
+
 # ros2 gym bridge
 RUN mkdir -p sim_ws/src/f1tenth_gym_ros
 COPY . /sim_ws/src/f1tenth_gym_ros
 RUN source /opt/ros/foxy/setup.bash && \
-    cd sim_ws/ && \
+    for package in /sim_ws/src/f1tenth_gym_ros/src/*; do \
+        if [ -f "$package/package.xml" ]; then ln -s "$package" /sim_ws/src/; fi; \
+    done && \
+    cd /sim_ws && \
     apt-get update --fix-missing && \
     rosdep install -i --from-path src --rosdistro foxy -y && \
-    colcon build
+    colcon build --symlink-install
 
 WORKDIR '/sim_ws'
 ENTRYPOINT ["/bin/bash"]

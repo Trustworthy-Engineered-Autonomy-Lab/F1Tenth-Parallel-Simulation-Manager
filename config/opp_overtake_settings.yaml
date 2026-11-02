@@ -5,9 +5,6 @@
 #
 #       - "overtake"              - the regular overtake implementation (overtake.py)
 #       - "overtake_aggressive"   - aggressive implementation (overtake_aggressive.py)
-#       - "overtake_left"         - implementation that favors passing on the left (overtake_left.py)
-#       - "overtake_right"        - implementation that favors passing on the right (overtake_right.py)
-#       - "overtake_conservative" - more cautious than the normal (overtake_conservative.py) 
 # ---
 
 overtake_profiles:
@@ -16,4 +13,4 @@ overtake_profiles:
   session_2:
     controller_node: "overtake_aggressive"
   session_3:
-    controller_node: "overtake_right"
+    controller_node: "overtake"

@@ -25,9 +25,6 @@ setup(
             ### Overtake implementations
             'overtake = overtake_controller.overtake:main',
             'overtake_aggressive = overtake_controller.overtake_aggressive:main',
-            'overtake_right = overtake_controller.overtake_right:main',
-            'overtake_left = overtake_controller.overtake_left:main',
-            'overtake_conservative = overtake_controller.overtake_conservative:main',
         ],
     },
 )

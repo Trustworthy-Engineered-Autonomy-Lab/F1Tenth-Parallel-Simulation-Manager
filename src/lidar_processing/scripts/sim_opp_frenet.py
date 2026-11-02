@@ -32,12 +32,14 @@ class SimOpponentFrenet(Node):
         )
 
     def odom_callback(self, msg):
+        # The bridge repeats observations at 250 Hz; update the estimator at 20 Hz.
+        now = rclpy.time.Time.from_msg(msg.header.stamp)
+        if self.last_time is not None and (now - self.last_time).nanoseconds < 50_000_000:
+            return
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
 
         s, d = self.track.convert_to_frenet(x, y)
-
-        now = self.get_clock().now()
 
         if self.last_time is None:
             dt = 0.05

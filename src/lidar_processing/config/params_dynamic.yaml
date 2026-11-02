@@ -25,7 +25,7 @@ dynamic_mppi:
     dt: 0.1
 
     # MPPI
-    num_trajectories: 10
+    num_trajectories: 256
     steps_trajectories: 15
     v_sigma: 0.05
     omega_sigma: 0.2
@@ -41,7 +41,7 @@ dynamic_mppi:
     divert_speed: 0.85                   # throttle for a divert that carries no v column
     return_len: 4.0                      # nominal rejoin length (m); auto-lengthens if tight
     return_spacing: 0.1                  # resample spacing for divert/return (m)
-    allow_interrupt: False               # accept a new divert mid-maneuver (game-theory later)
+    allow_interrupt: True                # track the game planner's latest defensive choice
     revert_margin_pts: 2
 
 divert_path_converter:

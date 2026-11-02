@@ -225,17 +225,29 @@ class ReferencePlanner:
 
         s_start = float(self.project(divert_wps[:1, :2])[0][0])
         s_end = float(self.project(return_wps[-1:, :2])[0][0])
+        entry_s = s_start
+        original_end_s = s_end
+        raceline, axis = self.raceline, self.s
         if s_end <= s_start:
-            raise ValueError("divert+return wraps the start/finish line; "
-                             "trigger the divert away from the seam")
+            # Rotate the loop so a maneuver crossing s=0 stays contiguous.
+            # Leave ample approach distance before the divert, so the controller
+            # does not mistake an approaching car for one beyond the return.
+            anchor = (s_start - self.total_s / 4.0) % self.total_s
+            axis = (self.s - anchor) % self.total_s
+            order = np.argsort(axis)
+            axis, raceline = axis[order], self.raceline[order]
+            s_start = (s_start - anchor) % self.total_s
+            s_end = (s_end - anchor) % self.total_s
+            if s_end <= s_start:
+                raise ValueError("maneuver spans too much of the track")
 
-        before = self.raceline[self.s < s_start]
-        after = self.raceline[self.s > s_end]
+        before = raceline[axis < s_start]
+        after = raceline[axis > s_end]
 
         divert_wps = divert_wps.copy()
         v_axis = np.append(self.raceline[:, 3], self.raceline[0, 3])
         s_axis = np.append(self.s, self.total_s)
-        v_entry = float(np.interp(s_start % self.total_s, s_axis, v_axis))
+        v_entry = float(np.interp(entry_s % self.total_s, s_axis, v_axis))
         k = min(6, len(divert_wps))
         if k > 1:
             w = _smootherstep(0.0, 1.0, np.linspace(0, 1, k))
@@ -249,7 +261,7 @@ class ReferencePlanner:
             "divert_end_idx": int(len(before) + len(divert_wps) - 1),
             "return_end_idx": int(len(before) + len(divert_wps) + len(return_wps) - 1),
             "return_end_xy": return_wps[-1, :2].copy(),
-            "s_start": s_start % self.total_s,
-            "s_end": s_end % self.total_s,
+            "s_start": entry_s % self.total_s,
+            "s_end": original_end_s % self.total_s,
         }
         return active, info

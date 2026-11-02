@@ -117,6 +117,11 @@ class RacetrackUtilities:
     def convert_to_frenet(self, x, y):
         return self.convert_to_frenet_arr([[x, y]])[0]
 
+    def unwrap_s(self, s, reference):
+        """Place wrapped track positions on the lap nearest reference."""
+        lap = self.arclength
+        return reference + (np.asarray(s) - reference + lap / 2.0) % lap - lap / 2.0
+
     def convert_to_cartesian_arr(self, s_arr, d_arr):
         """Vectorized convert_to_cartesian.
 

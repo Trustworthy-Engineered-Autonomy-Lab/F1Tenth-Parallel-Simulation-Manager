@@ -71,6 +71,9 @@ colcon build --symlink-install
 source install/local_setup.bash
 
 # --- read overtake controller node from config ---
+if [ ! -f "$RESULTS_DIR/opp_overtake_settings.yaml" ]; then
+    cp "$WS_DIR/src/f1tenth_gym_ros/config/opp_overtake_settings.yaml" "$RESULTS_DIR/opp_overtake_settings.yaml"
+fi
 PERSONALITY=$(python3 -c "
 import yaml
 with open('$RESULTS_DIR/opp_overtake_settings.yaml', 'r') as f:
@@ -98,54 +101,12 @@ ros2 launch f1tenth_gym_ros gym_bridge_launch.py
 # Create pane 1 (split horizontally)
 tmux split-window -h -t "$TMUX_SESSION":0
 
-# Pane 1: Ego defensive maneuvering + opponent overtaking
+# Pane 1: Full maneuver pipeline. ROS launch reports node failures and stops peers.
 tmux send-keys -t "$TMUX_SESSION":0.1 "
 source /opt/ros/foxy/setup.bash
 source install/local_setup.bash
-
-sleep 5
-
-echo 'Launching Frenet Node...'
-ros2 run frenet_frame_conv frenet_node &
-sleep 2
-
-echo 'Launching Opponent Overtaking IMM...'
-ros2 run overtake_controller imm_filter &
-sleep 2
-
-echo 'Launching Opponent Overtaking Controller ($PERSONALITY)...'
-ros2 run overtake_controller $PERSONALITY &
-sleep 2
-
-echo 'Launching Opponent Odometry Bridge...'
-ros2 run lidar_processing sim_opp_frenet.py &
-sleep 2
-
-echo 'Launching Defensive IMM...'
-ros2 run lidar_processing imm.py --ros-args -r /imm_path:=/defensive_imm_path &
-sleep 2
-
-echo 'Launching Defensive Trajectory Generator...'
-ros2 run lidar_processing generate_candidate_trajectories.py &
-sleep 2
-
-echo 'Launching Defensive Path Converter...'
-ros2 run lidar_processing path_converter_node.py --ros-args --params-file /sim_ws/src/lidar_processing/config/params_dynamic.yaml &
-sleep 2
-
-echo 'Launching Ego Dynamic MPPI...'
-ros2 run lidar_processing dynamic_mppi_node.py --ros-args --params-file /sim_ws/src/lidar_processing/config/params_dynamic.yaml &
-sleep 3
-
-echo 'Launching Env Manager...'
-SESSION_ID=$SESSION_ID MAX_LAPS=$MAX_LAPS RESULTS_DIR=$RESULTS_DIR ros2 run env_manager main &
-sleep 3
-
-echo 'Launching Data Logger...'
-SESSION_ID=$SESSION_ID RESULTS_DIR=$RESULTS_DIR ros2 run data_logger data_logger
+ros2 launch f1tenth_gym_ros maneuver_launch.py controller:=$PERSONALITY 2>&1 | tee $RESULTS_DIR/maneuvers.log
 " C-m
-
-
 
 tmux select-layout -t "$TMUX_SESSION" even-horizontal
 

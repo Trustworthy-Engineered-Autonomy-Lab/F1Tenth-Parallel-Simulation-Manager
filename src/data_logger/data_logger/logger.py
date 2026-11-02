@@ -105,11 +105,6 @@ class DataLogger(Node):
         # who is ahead *after* we fixed wrap‑around?
         opp_ahead_now = delta > 0.0   # True if opponent is ahead
 
-        # DEBUG – you can delete this line in production
-        print(f"[DEBUG] ego_s={self.ego_s:.2f}  opp_s={self.opp_s:.2f}  "
-              f"delta={delta:.2f}  opp_ahead_now={opp_ahead_now}  "
-              f"last_opp_ahead={self.last_opp_ahead}")
-
         # crossing test: from behind (False) → ahead (True)
         if opp_ahead_now and not self.last_opp_ahead:
             self.overtake_num += 1

@@ -28,6 +28,9 @@ class FrenetNode(Node):
         
         self.centerline = self.load_centerline(csv_path)
         self.arc_lengths = self.compute_arc_lengths(self.centerline)
+        self.segments = np.diff(self.centerline, axis=0)
+        self.segment_lengths = np.linalg.norm(self.segments, axis=1)
+        self.segment_lengths_sq = np.maximum(self.segment_lengths ** 2, 1e-12)
         self.get_logger().info(f"Total calculated track arclength: {self.arc_lengths[-1]:.2f}m")
 
         self.get_logger().info(
@@ -83,38 +86,17 @@ class FrenetNode(Node):
         return np.array(s)
 
     def cartesian_to_frenet(self, x, y):
-        cart_position = np.array([x, y])
-        best_dist = float("inf")
-        best_s = 0.0
-        best_d = 0.0
-
-        for i in range(len(self.centerline) - 1):
-            p1 = self.centerline[i]
-            p2 = self.centerline[i + 1]
-            segment = p2 - p1
-            seg_length = np.linalg.norm(segment)
-
-            if seg_length < 1e-6:
-                continue
-
-            # Projection of point onto segment
-            t = np.dot(cart_position - p1, segment) / (seg_length ** 2)
-            t = np.clip(t, 0.0, 1.0)
-
-            projected = p1 + t * segment
-            diff = cart_position - projected
-            distance = np.linalg.norm(diff)
-
-            if distance < best_dist:
-                best_dist = distance
-
-                cross = segment[0] * diff[1] - segment[1] * diff[0]
-                sign = np.sign(cross)
-
-                best_d = sign * distance
-                best_s = self.arc_lengths[i] + t * seg_length
-
-        return best_s, best_d
+        # Project all segments together: the bridge publishes two odometries at
+        # 250 Hz, so a Python loop over thousands of segments cannot keep up.
+        offsets = np.array([x, y]) - self.centerline[:-1]
+        t = np.clip(np.sum(offsets * self.segments, axis=1) / self.segment_lengths_sq, 0.0, 1.0)
+        diff = offsets - t[:, None] * self.segments
+        distance_sq = np.sum(diff ** 2, axis=1)
+        distance_sq[self.segment_lengths < 1e-6] = np.inf
+        i = int(np.argmin(distance_sq))
+        cross = self.segments[i, 0] * diff[i, 1] - self.segments[i, 1] * diff[i, 0]
+        return (self.arc_lengths[i] + t[i] * self.segment_lengths[i],
+                np.sign(cross) * np.sqrt(distance_sq[i]))
 
     def ego_odom_callback(self, msg):
         x = msg.pose.pose.position.x

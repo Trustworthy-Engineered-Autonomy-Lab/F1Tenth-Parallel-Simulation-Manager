@@ -44,6 +44,7 @@ class OpponentIntentPredictor(Node):
         self.smoothing_lam = 0.5      # make_smoothing_spline lam (t normalised to [0, 1])
         self.n_fit_points = 40       # RRT polyline is resampled to this many points (must be >= 5)
         self.max_s_clearance = 5.0
+        self.lane_change_length = 2.2    # reach the blocking lane within the controller's lookahead
 
         # roadmap search over the RRT* opponent paths (same values as diverse_opponent_trajectories_node)
         self.roadmap_k = 3                # diverse opponent trajectories fed to the Stackelberg game
@@ -56,8 +57,10 @@ class OpponentIntentPredictor(Node):
         self.roadmap_smooth_s = 0.3       # B-spline smoothing factor
 
         self.rutil = RacetrackUtilities("/sim_ws/src/lidar_processing/scripts/Spielberg_map.csv")
+        self.declare_parameter('rrt_time_budget', 0.02)
         self.planner = RRTStarPlanner(max_iter=500, d_limit=self.d_limit, d_clear=self.d_clear,
-                                      time_budget=0.2, step_target_hops=12, step_min=0.5, step_max=3.0)
+                                      time_budget=self.get_parameter('rrt_time_budget').value,
+                                      step_target_hops=12, step_min=0.5, step_max=3.0)
 
         # EMA of the measured wall-time of a whole planning cycle [s], from reading
         # the poses to publishing. Both cars are projected forward by it so the
@@ -138,6 +141,9 @@ class OpponentIntentPredictor(Node):
         if self.points_seq == self.planned_seq:
             return
         self.planned_seq = self.points_seq
+        age = (self.get_clock().now() - Time.from_msg(self.latest_stamp)).nanoseconds * 1e-9
+        if age > self.max_start_age:
+            return
 
         points = self.latest_points
 
@@ -161,6 +167,7 @@ class OpponentIntentPredictor(Node):
         starts = []
         for (x, y) in points[:NUM_START_POINTS]:
             s_opp, d_opp = self.rutil.convert_to_frenet(x, y)
+            s_opp = self.rutil.unwrap_s(s_opp, s_ego - ego_speed * lead)
             starts.append((s_opp + self.opponent_velocity * lead, d_opp))
 
         starts = np.asarray(starts, dtype=float)
@@ -199,7 +206,14 @@ class OpponentIntentPredictor(Node):
             # All candidates -> /ego_candidate_splines (best highlighted green).
             self.publish_ego_candidate_splines(ego_carts, best_ego_idx)
             # Best defence only -> /ego_best_defensive_spline.
-            self.publish_ego_best_defensive_spline([ego_carts[best_ego_idx]])
+            # Holding the current line is a valid game result, but must not
+            # replace an active blocking maneuver with a no-op divert/return.
+            selected = ego_time_paths[best_ego_idx]
+            if abs(selected[-1, 2] - selected[0, 2]) >= 0.1:
+                self.publish_ego_best_defensive_spline([ego_carts[best_ego_idx]])
+            self.get_logger().info(
+                f"defensive lane selected: d={ego_time_paths[best_ego_idx][-1, 2]:.2f} m",
+                throttle_duration_sec=1.0)
 
 
     def get_rrt_conditions(self, starts, s_ego, d_ego, goals):
@@ -293,16 +307,14 @@ class OpponentIntentPredictor(Node):
         """One constant-speed ego lane as a (path_resolution, 3) [t, s, d] array,
         starting at (s_ego, d_ego) and shifting toward d_traj.
 
-        The lateral blend is concave up (u**2) and begins at t=0 with no flat
-        hold, so the divert is carried in the reference from the very start of
-        the path (the downstream controller sees the offset immediately) rather
-        than the previous ease-in/ease-out smoothstep that held d_ego for the
-        first 30% of the horizon. Caller guarantees max_ot_time > 0."""
+        Complete the lane change over a bounded longitudinal distance so a
+        receding-horizon controller sees the blocking offset early. Caller
+        guarantees max_ot_time > 0."""
         horizon = min(max_ot_time * self.ego_velocity, self.max_s_clearance)
         T = horizon / self.ego_velocity
         t = np.linspace(0.0, T, self.path_resolution)
-        u = t / T                                # no dead time: shift begins at t=0
-        blend = u * u                            # concave-up lateral profile
+        u = np.clip(self.ego_velocity * t / self.lane_change_length, 0.0, 1.0)
+        blend = u * u * (3.0 - 2.0 * u)
         s = s_ego + self.ego_velocity * t
         return np.column_stack((t, s, d_ego + (d_traj - d_ego) * blend))
 

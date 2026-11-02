@@ -32,6 +32,7 @@ from geometry_msgs.msg import TransformStamped
 from geometry_msgs.msg import Transform
 from geometry_msgs.msg import Quaternion
 from ackermann_msgs.msg import AckermannDriveStamped
+from std_msgs.msg import Bool
 from tf2_ros import TransformBroadcaster
 
 import gym
@@ -137,11 +138,13 @@ class GymBridge(Node):
         # publishers
         self.ego_scan_pub = self.create_publisher(LaserScan, ego_scan_topic, 10)
         self.ego_odom_pub = self.create_publisher(Odometry, ego_odom_topic, 10)
+        self.ego_collision_pub = self.create_publisher(Bool, self.ego_namespace + '/collision', 10)
         self.ego_drive_published = False
         if num_agents == 2:
             self.opp_scan_pub = self.create_publisher(LaserScan, opp_scan_topic, 10)
             self.ego_opp_odom_pub = self.create_publisher(Odometry, ego_opp_odom_topic, 10)
             self.opp_odom_pub = self.create_publisher(Odometry, opp_odom_topic, 10)
+            self.opp_collision_pub = self.create_publisher(Bool, self.opp_namespace + '/collision', 10)
             self.opp_ego_odom_pub = self.create_publisher(Odometry, opp_ego_odom_topic, 10)
             self.opp_drive_published = False
 
@@ -247,6 +250,7 @@ class GymBridge(Node):
         scan.range_max = 30.
         scan.ranges = self.ego_scan
         self.ego_scan_pub.publish(scan)
+        self.ego_collision_pub.publish(Bool(data=self.ego_collision))
 
         if self.has_opp:
             opp_scan = LaserScan()
@@ -259,6 +263,7 @@ class GymBridge(Node):
             opp_scan.range_max = 30.
             opp_scan.ranges = self.opp_scan
             self.opp_scan_pub.publish(opp_scan)
+            self.opp_collision_pub.publish(Bool(data=self.opp_collision))
 
         # pub tf
         self._publish_odom(ts)
@@ -268,7 +273,9 @@ class GymBridge(Node):
 
     def _update_sim_state(self):
         self.ego_scan = list(self.obs['scans'][0])
+        self.ego_collision = bool(self.obs['collisions'][0])
         if self.has_opp:
+            self.opp_collision = bool(self.obs['collisions'][1])
             self.opp_scan = list(self.obs['scans'][1])
             self.opp_pose[0] = self.obs['poses_x'][1]
             self.opp_pose[1] = self.obs['poses_y'][1]

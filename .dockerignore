@@ -1,0 +1,9 @@
+.git
+results
+saved_results
+build
+install
+log
+**/__pycache__
+**/.pytest_cache
+*.log

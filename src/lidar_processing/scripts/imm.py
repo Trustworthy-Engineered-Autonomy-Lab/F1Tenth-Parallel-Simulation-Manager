@@ -450,11 +450,11 @@ class IMMFilterNode(Node):
 
         self.last_ego_s, self.last_ego_d = self.racetrack_utilities.convert_to_frenet(x, y)
 
-        if not self._last_s:
+        if self._last_s is None:
             self.ego_ahead = False
             return
 
-        if self.last_ego_s >= self._last_s:
+        if self.racetrack_utilities.unwrap_s(self.last_ego_s, self._last_s) >= self._last_s:
             self.ego_ahead = True
         else:
             self.ego_ahead = False
@@ -484,7 +484,11 @@ class IMMFilterNode(Node):
 
         # Same acceptance criterion as before, hoisted out of the loop.
         s_lower = self._last_s
-        s_upper = self.last_ego_s - 0.1 * (self.last_ego_s - self._last_s)
+        if s_lower is None or self.last_ego_s is None:
+            return
+        ego_s = self.racetrack_utilities.unwrap_s(self.last_ego_s, s_lower)
+        s_upper = ego_s - 0.1 * (ego_s - s_lower)
+        s_mean = self.racetrack_utilities.unwrap_s(s_mean, s_lower)
 
         filtered_points_frenet = []
         attempts = 0

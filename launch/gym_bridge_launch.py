@@ -21,8 +21,10 @@
 # SOFTWARE.
 
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch_ros.actions import Node
-from launch.substitutions import Command
+from launch.substitutions import Command, LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
 import os
 import yaml
@@ -48,6 +50,7 @@ def generate_launch_description():
         package='rviz2',
         executable='rviz2',
         name='rviz',
+        condition=IfCondition(LaunchConfiguration('rviz')),
         arguments=['-d', os.path.join(get_package_share_directory('f1tenth_gym_ros'), 'launch', 'gym_bridge.rviz')]
     )
     map_server_node = Node(
@@ -84,6 +87,7 @@ def generate_launch_description():
     )
 
     # finalize
+    ld.add_action(DeclareLaunchArgument('rviz', default_value='true'))
     ld.add_action(rviz_node)
     ld.add_action(bridge_node)
     ld.add_action(nav_lifecycle_node)
