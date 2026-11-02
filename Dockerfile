@@ -34,8 +34,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update --fix-missing && \
                        tmux \
                        ros-foxy-rviz2 \
                        ros-foxy-pcl-ros \
-                       ros-foxy-sensor-msgs-py \
-                       yq
+                       ros-foxy-sensor-msgs-py
 RUN apt-get -y dist-upgrade
 RUN pip3 install transforms3d filterpy scikit-learn
 
