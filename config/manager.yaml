@@ -12,9 +12,9 @@
 #                (can also set overtake_reset to true to reset on opp overtaking the ego)
 # -----------
 
-num_sessions: 3     # how many parallel Docker sessions to launch (default: 3)
-num_simulations: 3  # how many simulations will be run on each docker session
-max_laps: 2         # how many laps each session should run before ending the simulation
+num_sessions: 1     # how many parallel Docker sessions to launch (default: 3)
+num_simulations: 24  # how many simulations will be run on each docker session
+max_laps: 1         # how many laps each simulation should run max (resets after 1 lap IF no overtake)
 
 lap_detection:
   method: "bubble"           # "bubble" or "point"

@@ -91,6 +91,7 @@ class DataLogger(Node):
         """Handle reset event"""
         if msg.data:
             self.get_logger().info("🔄 Reset signal received")
+            self.lap_num = 0
             self.overtake_num = 0          # Reset overtake counter for new simulation
             self.last_opp_ahead = False    # Reset overtake state tracking too
 
