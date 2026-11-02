@@ -28,6 +28,7 @@ from nav_msgs.msg import Path, Odometry
 from geometry_msgs.msg import PoseStamped, Pose, Point
 from visualization_msgs.msg import MarkerArray, Marker
 from racetrack_utilities.racetrack_utilities import RacetrackUtilities
+from lidar_processing.scenario_lifecycle import ScenarioLifecycle
 
 from filterpy.kalman import KalmanFilter
 
@@ -382,6 +383,7 @@ class IMMFilterNode(Node):
 
     def __init__(self):
         super().__init__('imm_filter_node')
+        self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, ('ego_odom_cb', '_cb', '_coast_tick'))
 
         name = "/sim_ws/src/lidar_processing/scripts/Spielberg_map.csv"
         self.racetrack_utilities = RacetrackUtilities(name)
@@ -440,6 +442,24 @@ class IMMFilterNode(Node):
         self.coast_timer = self.create_timer(PREDICT_DT, self._coast_tick)
     
         self.get_logger().info('IMMFilterNode ready.')
+
+    def reset_scenario(self, _message):
+        self.s_imm.reinitialize(np.zeros(3))
+        self.d_imm.reinitialize(np.zeros(2))
+        self._initialized = False
+        self._last_s = self._last_d = self._last_obs_time = None
+        self.last_ego_s = self.last_ego_d = None
+        self.ego_ahead = False
+        self._last_path = None
+        self._clear_coast_state()
+        path = Path()
+        path.header.frame_id = 'map'
+        path.header.stamp = self.get_clock().now().to_msg()
+        self.pub.publish(path)
+        marker = Marker()
+        marker.header = path.header
+        marker.type = Marker.POINTS
+        self.opp_pos_pub.publish(marker)
 
     # ──────────────────────────────────────────────────────────────────────
     # Small state helpers

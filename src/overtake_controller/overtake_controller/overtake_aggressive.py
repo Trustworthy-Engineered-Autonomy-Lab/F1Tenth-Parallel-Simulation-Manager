@@ -9,10 +9,14 @@ from nav_msgs.msg import Path, Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
 from std_msgs.msg import String
 from overtake_controller.track_following import RacelineFollower
+from lidar_processing.scenario_lifecycle import ScenarioLifecycle
 
 class OpponentOvertakeController(Node):
     def __init__(self):
         super().__init__('opponent_overtake_controller')
+        self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, (
+            'scan_callback', 'opp_odom_callback', 'ego_odom_callback', 'spline_callback', 'control_loop'))
+        self.ego_data_received = self.opp_data_received = False
         self.raceline_follower = RacelineFollower()
         
         # Subscriptions
@@ -86,10 +90,22 @@ class OpponentOvertakeController(Node):
 
     # ---------------- TELEMETRY CALLBACKS ----------------
 
+    def reset_scenario(self, _message):
+        self.current_mode = 'FTG'
+        self.overtake_spline = None
+        self.scan_msg = None
+        self.processed_lidar = []
+        self.prev_steer = self.pp_steer_ema = 0.0
+        self.ego_speed = self.opp_speed = 0.0
+        self.ego_data_received = self.opp_data_received = False
+        self.drive_pub.publish(AckermannDriveStamped())
+        self.status_pub.publish(String(data='FTG'))
+
     def scan_callback(self, msg):
         self.scan_msg = msg
 
     def opp_odom_callback(self, msg):
+        self.opp_data_received = True
         self.opp_x = msg.pose.pose.position.x
         self.opp_y = msg.pose.pose.position.y
         q = msg.pose.pose.orientation
@@ -97,6 +113,7 @@ class OpponentOvertakeController(Node):
         self.opp_speed = math.hypot(msg.twist.twist.linear.x, msg.twist.twist.linear.y)
 
     def ego_odom_callback(self, msg):
+        self.ego_data_received = True
         self.ego_x = msg.pose.pose.position.x
         self.ego_y = msg.pose.pose.position.y
         self.ego_speed = math.hypot(msg.twist.twist.linear.x, msg.twist.twist.linear.y)
@@ -110,7 +127,8 @@ class OpponentOvertakeController(Node):
     # ---------------- MAIN CONTROL LOOP ----------------
 
     def control_loop(self):
-        if self.scan_msg is None: return
+        if self.scan_msg is None or not (self.ego_data_received and self.opp_data_received):
+            return
 
         drive_msg = AckermannDriveStamped()
         drive_msg.header.stamp = self.get_clock().now().to_msg()

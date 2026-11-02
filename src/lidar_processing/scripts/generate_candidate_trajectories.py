@@ -17,6 +17,7 @@ from scipy.interpolate import make_smoothing_spline
 from racetrack_utilities.racetrack_utilities import RacetrackUtilities
 from rrt_planner.rrt_planner import RRTStarPlanner
 from stackelberg import pick_trajectory
+from lidar_processing.scenario_lifecycle import ScenarioLifecycle
 from diverse_opponent_trajectories_node import (Roadmap, build_roadmap_from_splines, diverse_roadmap_search,
                                                 path_to_xy as roadmap_path_to_xy, bspline_smooth)
 
@@ -89,6 +90,9 @@ class OpponentIntentPredictor(Node):
         #   plan_group -- the slow RRT* planning cycle (does all publishing)
         io_group = MutuallyExclusiveCallbackGroup()
         plan_group = MutuallyExclusiveCallbackGroup()
+        self.lifecycle = ScenarioLifecycle(
+            self, self.reset_scenario, ('ego_odom_callback', 'starting_points_cb'),
+            callback_group=io_group)
 
         self.create_subscription(Odometry, '/ego_racecar/odom',
                                  self.ego_odom_callback, latest_qos,
@@ -120,6 +124,22 @@ class OpponentIntentPredictor(Node):
     # ------------------------------------------------------------------
     # Subscribers
     # ------------------------------------------------------------------
+    def reset_scenario(self, _message):
+        self.ego_data_received = False
+        self.ego_speed = 0.0
+        self.latest_points = self.latest_stamp = None
+        self.points_seq = self.planned_seq = 0
+        self.plan_duration_est = self.planner.time_budget * NUM_START_POINTS
+        clear = Marker()
+        clear.header.frame_id = 'map'
+        clear.header.stamp = self.get_clock().now().to_msg()
+        clear.action = Marker.DELETEALL
+        markers = MarkerArray(markers=[clear])
+        for publisher in [*self.threat_splines_pubs, self.ego_best_defensive_spline_pub,
+                          self.ego_candidate_splines_pub, self.diverse_trajectories_pub]:
+            publisher.publish(markers)
+        self.num_overtaking_splines_pub.publish(Int32(data=0))
+
     def ego_odom_callback(self, msg):
         p = msg.pose.pose.position
         self.ego_state = (p.x, p.y, self.quat_to_yaw(msg.pose.pose.orientation))
@@ -136,22 +156,26 @@ class OpponentIntentPredictor(Node):
     # ------------------------------------------------------------------
 
     def plan_timer_cb(self):
-        if not self.ego_data_received or self.latest_points is None:
-            return
-        if self.points_seq == self.planned_seq:
-            return
-        self.planned_seq = self.points_seq
-        age = (self.get_clock().now() - Time.from_msg(self.latest_stamp)).nanoseconds * 1e-9
-        if age > self.max_start_age:
-            return
+        with self.lifecycle.lock:
+            if not self.lifecycle.ready:
+                return
+            generation = self.lifecycle.generation
+            if not self.ego_data_received or self.latest_points is None:
+                return
+            if self.points_seq == self.planned_seq:
+                return
+            self.planned_seq = self.points_seq
+            age = (self.get_clock().now() - Time.from_msg(self.latest_stamp)).nanoseconds * 1e-9
+            if age > self.max_start_age:
+                return
 
-        points = self.latest_points
+            points = self.latest_points
 
-        if len(points) == 0: return
+            if len(points) == 0: return
 
-        cycle_t0 = time.perf_counter()
-        ex, ey, _ = self.ego_state
-        ego_speed = self.ego_speed
+            cycle_t0 = time.perf_counter()
+            ex, ey, _ = self.ego_state
+            ego_speed = self.ego_speed
 
         s_ego, d_ego = self.rutil.convert_to_frenet(ex, ey)
 
@@ -177,44 +201,49 @@ class OpponentIntentPredictor(Node):
 
         ego_time_paths = self.generate_ego_lane_possibilities(s_ego, d_ego, max_ot_time)
 
-        num_overtaking_splines = self.publish_threat_markers(threat_paths)
+        num_overtaking_splines = sum(len(paths) for paths in threat_paths)
 
         # The roadmap search's diverse trajectories are the opponent's options.
         opponent_paths = self.diverse_opponent_paths(threat_paths)
-        self.publish_diverse_trajectories(opponent_paths)
         best_ego_idx = None
         if opponent_paths and ego_time_paths:
             best_ego_idx = pick_trajectory(ego_time_paths, opponent_paths,
                                            self.ego_velocity, self.opponent_velocity, self.rutil)
 
-        # Feed the measured cycle time into next cycle's projection (EMA).
-        cycle_time = time.perf_counter() - cycle_t0
-        self.plan_duration_est += 0.3 * (cycle_time - self.plan_duration_est)
-        # markers must outlive the gap to the next cycle or they blink off between cycles
-        self.marker_lifetime = max(3.5 * self.plan_period, 1.5 * self.plan_duration_est)
-        self.get_logger().info(
-            f"planning cycle {1e3 * cycle_time:.0f} ms, projected ego {ego_speed * lead:.2f} m ahead "
-            f"({ego_speed:.2f} m/s x {1e3 * lead:.0f} ms), {num_overtaking_splines} RRT* paths -> "
-            f"{len(opponent_paths)} diverse opponent trajectories", throttle_duration_sec=1.0)
-
-        # Publish the defensive splines ONLY when overtaking splines were
-        # produced this cycle (same trigger as the threat markers) and a
-        # defensive lane was actually selected.
-        if num_overtaking_splines > 0 and best_ego_idx is not None:
-            ego_carts = [self.rutil.convert_to_cartesian_arr(p[:, 1], p[:, 2])
-                         for p in ego_time_paths]
-            # All candidates -> /ego_candidate_splines (best highlighted green).
-            self.publish_ego_candidate_splines(ego_carts, best_ego_idx)
-            # Best defence only -> /ego_best_defensive_spline.
-            # Holding the current line is a valid game result, but must not
-            # replace an active blocking maneuver with a no-op divert/return.
-            selected = ego_time_paths[best_ego_idx]
-            if abs(selected[-1, 2] - selected[0, 2]) >= 0.1:
-                self.publish_ego_best_defensive_spline([ego_carts[best_ego_idx]])
+        # Reset callbacks run alongside RRT*. Discard work started on an old
+        # scenario and serialize publishing with reset's marker clearing.
+        with self.lifecycle.lock:
+            if generation != self.lifecycle.generation or not self.lifecycle.ready:
+                return
+            self.publish_threat_markers(threat_paths)
+            self.publish_diverse_trajectories(opponent_paths)
+            # Feed the measured cycle time into next cycle's projection (EMA).
+            cycle_time = time.perf_counter() - cycle_t0
+            self.plan_duration_est += 0.3 * (cycle_time - self.plan_duration_est)
+            # markers must outlive the gap to the next cycle or they blink off between cycles
+            self.marker_lifetime = max(3.5 * self.plan_period, 1.5 * self.plan_duration_est)
             self.get_logger().info(
-                f"defensive lane selected: d={ego_time_paths[best_ego_idx][-1, 2]:.2f} m",
-                throttle_duration_sec=1.0)
+                f"planning cycle {1e3 * cycle_time:.0f} ms, projected ego {ego_speed * lead:.2f} m ahead "
+                f"({ego_speed:.2f} m/s x {1e3 * lead:.0f} ms), {num_overtaking_splines} RRT* paths -> "
+                f"{len(opponent_paths)} diverse opponent trajectories", throttle_duration_sec=1.0)
 
+            # Publish the defensive splines ONLY when overtaking splines were
+            # produced this cycle (same trigger as the threat markers) and a
+            # defensive lane was actually selected.
+            if num_overtaking_splines > 0 and best_ego_idx is not None:
+                ego_carts = [self.rutil.convert_to_cartesian_arr(p[:, 1], p[:, 2])
+                             for p in ego_time_paths]
+                # All candidates -> /ego_candidate_splines (best highlighted green).
+                self.publish_ego_candidate_splines(ego_carts, best_ego_idx)
+                # Best defence only -> /ego_best_defensive_spline.
+                # Holding the current line is a valid game result, but must not
+                # replace an active blocking maneuver with a no-op divert/return.
+                selected = ego_time_paths[best_ego_idx]
+                if abs(selected[-1, 2] - selected[0, 2]) >= 0.1:
+                    self.publish_ego_best_defensive_spline([ego_carts[best_ego_idx]])
+                self.get_logger().info(
+                    f"defensive lane selected: d={ego_time_paths[best_ego_idx][-1, 2]:.2f} m",
+                    throttle_duration_sec=1.0)
 
     def get_rrt_conditions(self, starts, s_ego, d_ego, goals):
         ego_pose_frenet = np.array([s_ego, d_ego])

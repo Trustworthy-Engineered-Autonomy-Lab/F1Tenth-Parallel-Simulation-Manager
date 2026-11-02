@@ -10,10 +10,13 @@ from geometry_msgs.msg import PoseStamped, Pose
 from rclpy.time import Time, Duration
 import csv
 from copy import copy, deepcopy
+from lidar_processing.scenario_lifecycle import ScenarioLifecycle
 
 class IMMNode(Node):
     def __init__(self):
         super().__init__('imm_predictor')
+        self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, (
+            'odom_callback', 'state_callback', 'imm_active_cb', 'inactive_state_cb'))
         
         self.dt = 0.050
         self.prev_deg = 0.00
@@ -42,6 +45,8 @@ class IMMNode(Node):
                           [0.01, 0.01, 0.98]])
         
         self.imm_model = IMMEstimator(filters, mu, trans)
+        self.initial_mu = np.array(mu)
+        self.initial_transition = trans.copy()
         self.imm_model_inactive =  False
         
         # 🚨 UPDATED: Explicitly naming topics to track the Ego car
@@ -69,6 +74,18 @@ class IMMNode(Node):
         self.inactive_state_cb_timer = self.create_timer(0.050, self.inactive_state_cb, None, self.get_clock())
         self.raceline_sub = self.create_subscription(Path, '/global_raceline', self.global_raceline_cb, 10)
 
+    def reset_scenario(self, _message):
+        self.imm_model = IMMEstimator(
+            [self.create_kf_cv(self.dt), self.create_kf_ca(self.dt), self.create_kf_ct(self.dt, 0.5)],
+            self.initial_mu.copy(), self.initial_transition.copy())
+        self.first_callback = True
+        self.imm_model_inactive = True
+        self.last_state_cb_time = self.last_odom_pub_time = self.get_clock().now()
+        self.prev_x = self.prev_y = self.prev_w = self.prev_deg = 0.0
+        self.wait_count = 0
+        self.publish_path([])
+        self.imm_active_pub.publish(String(data='False'))
+
     def imm_active_cb(self):
         if self.imm_model_inactive:
             self.imm_active_pub.publish(String(data="False"))
@@ -76,6 +93,8 @@ class IMMNode(Node):
             self.imm_active_pub.publish(String(data="True"))
 
     def inactive_state_cb(self):
+        if self.first_callback:
+            return
         if self.get_clock().now() - self.last_state_cb_time >= Duration(seconds=0, nanoseconds=100e6):
             self.imm_model_inactive = True
             self.imm_model.predict()

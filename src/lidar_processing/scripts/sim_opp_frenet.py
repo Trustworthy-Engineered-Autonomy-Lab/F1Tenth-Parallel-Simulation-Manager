@@ -6,11 +6,13 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64MultiArray
 
 from racetrack_utilities.racetrack_utilities import RacetrackUtilities
+from lidar_processing.scenario_lifecycle import ScenarioLifecycle
 
 
 class SimOpponentFrenet(Node):
     def __init__(self):
         super().__init__("sim_opponent_frenet")
+        self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, ('odom_callback',))
 
         self.track = RacetrackUtilities(
             "/sim_ws/src/lidar_processing/scripts/Spielberg_map.csv"
@@ -30,6 +32,9 @@ class SimOpponentFrenet(Node):
             self.odom_callback,
             10
         )
+
+    def reset_scenario(self, _message):
+        self.last_time = None
 
     def odom_callback(self, msg):
         # The bridge repeats observations at 250 Hz; update the estimator at 20 Hz.

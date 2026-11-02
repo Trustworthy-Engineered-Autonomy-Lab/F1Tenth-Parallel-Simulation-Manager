@@ -21,11 +21,13 @@ from visualization_msgs.msg import MarkerArray
 
 from f1tenth_mppi_dynamic.reference_manager import ReferencePlanner
 from f1tenth_mppi_dynamic.io_utils import pack_waypoints
+from lidar_processing.scenario_lifecycle import ScenarioLifecycle
 
 
 class PathConverter(Node):
     def __init__(self):
         super().__init__("divert_path_converter")
+        self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, ('cb',))
         self.declare_parameters("", [
             ("in_topic", "/ego_best_defensive_spline"),
             ("out_topic", "/divert_waypoints"),
@@ -40,6 +42,9 @@ class PathConverter(Node):
         self.get_logger().info(
             f"converter: {self.get_parameter('in_topic').value} -> "
             f"{self.get_parameter('out_topic').value}")
+
+    def reset_scenario(self, _message):
+        self.pub.publish(Float64MultiArray())
 
     def cb(self, msg: MarkerArray):
         if not msg.markers:

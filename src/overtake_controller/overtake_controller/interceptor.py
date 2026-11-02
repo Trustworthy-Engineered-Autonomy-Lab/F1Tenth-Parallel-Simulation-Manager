@@ -10,10 +10,14 @@ from visualization_msgs.msg import Marker
 from std_msgs.msg import String
 from scipy.interpolate import splev
 from racetrack_utilities.racetrack_utilities import RacetrackUtilities
+from lidar_processing.scenario_lifecycle import ScenarioLifecycle
 
 class OvertakeInterceptorNode(Node):
     def __init__(self):
         super().__init__('overtake_interceptor')
+        self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, (
+            'ego_odom_callback', 'opp_odom_callback', 'imm_path_callback',
+            'scan_callback', 'continuous_spline_update'))
         self.declare_parameter('racetrack_csv', '/sim_ws/src/lidar_processing/scripts/Spielberg_map.csv')
         self.track = RacetrackUtilities(self.get_parameter('racetrack_csv').value)
         
@@ -65,6 +69,16 @@ class OvertakeInterceptorNode(Node):
         
         self.create_timer(0.05, self.continuous_spline_update)
         self.get_logger().info("🎯 PLANNER Started - SAFE WALL CLEARANCE ACTIVE!")
+
+    def reset_scenario(self, _message):
+        self.locked_spline = None
+        self.predicted_ego_path = []
+        self.ego_data_received = self.opp_data_received = self.imm_data_received = False
+        self.ego_speed = self.opp_speed = 0.0
+        self.scan_ranges = np.array([])
+        self.current_side = 'left'
+        self.publish_empty_path()
+        self.set_mode('FTG')
 
     def set_mode(self, new_mode):
         if new_mode != self.current_mode:

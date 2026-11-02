@@ -51,6 +51,7 @@ from f1tenth_mppi_dynamic.reference_manager import ReferencePlanner
 from f1tenth_mppi_dynamic.io_utils import (load_waypoints, unpack_waypoints, line_marker)
 # Frenet (s, d) <-> Cartesian for the track, used to build a smooth return.
 from racetrack_utilities.racetrack_utilities import RacetrackUtilities
+from lidar_processing.scenario_lifecycle import ScenarioLifecycle
 
 RACELINE, DIVERT, RETURN = "RACELINE", "DIVERT", "RETURN"
 
@@ -58,6 +59,7 @@ RACELINE, DIVERT, RETURN = "RACELINE", "DIVERT", "RETURN"
 class DynamicMPPI(Node):
     def __init__(self):
         super().__init__("dynamic_mppi")
+        self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, ('divert_cb', 'callback'))
         self.info = self.get_logger()
         self._init_params()
         if self.get_parameter("drive_topic").value is None:
@@ -118,6 +120,16 @@ class DynamicMPPI(Node):
         if P("visualize"):
             self._publish_reference_markers()
         self.info.info("dynamic_mppi node initialized (state=RACELINE)")
+
+    def reset_scenario(self, _message):
+        self.state = RACELINE
+        self.active_waypoints = self.raceline
+        self.maneuver = None
+        self.u_prev.fill(0.0)
+        for queue in self.sync.queues:
+            queue.clear()
+        self.drive_pub.publish(AckermannDriveStamped())
+        self.state_pub.publish(String(data=RACELINE))
 
     def _init_params(self):
         self.declare_parameters("", [
