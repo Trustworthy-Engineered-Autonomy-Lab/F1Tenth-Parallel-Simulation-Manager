@@ -25,6 +25,9 @@ the planner tries the other side, then falls back to track following and retries
 on later planning cycles. A following-distance speed limit applies when the ego
 enters the opponent's lane. The legacy status name `FTG` denotes this fallback;
 the normal fallback now uses a raceline reference to avoid gap-control corner clips.
+Before sending a drive command, both opponent profiles also check a braking rollout
+of the car's footprint against the latest scan. They reduce speed or brake when
+the proposed command has insufficient clearance.
 Dynamic MPPI accepts updated defensive paths while maneuvering (`allow_interrupt:
 True`); otherwise an initial hold-line choice can suppress a later blocking move.
 Hold-line choices do not replace active blocking paths. Defensive lane changes
@@ -49,8 +52,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start_f1tenth.ps1
 
 That command starts all three sessions; append `-NumSessions 1` for one session.
 
-Open [session 1](http://localhost:8081/vnc.html). The default three-session run uses
-the regular, aggressive, and regular opponent profiles. Only `overtake` and
+Open [session 1](http://localhost:8081/vnc.html). `config/manager.yaml` defaults to
+one Docker session running 24 scenarios, with one lap maximum per scenario and a
+reset when the opponent is 3 m ahead. Use `-NumSessions 3` to run three parallel
+sessions with regular, aggressive, and regular opponent profiles. Only `overtake` and
 `overtake_aggressive` are implemented in `config/opp_overtake_settings.yaml`.
 
 The complete behavior pipeline is defined in `launch/maneuver_launch.py`. A node
@@ -73,7 +78,8 @@ docker run --rm f1tenth_gym_ros -lc 'source /opt/ros/foxy/setup.bash && source /
 docker run --rm f1tenth_gym_ros -lc 'source /opt/ros/foxy/setup.bash && source /sim_ws/install/setup.bash && python3 /sim_ws/src/f1tenth_gym_ros/test/check_maneuvers.py --duration 90'
 ```
 
-The behavior check requires both cars to move, a lateral defensive path, actual
+The single-encounter behavior check disables the scenario manager so it can measure
+continuous driving without respawns. It requires both cars to move, a lateral defensive path, actual
 ego lateral movement while in `DIVERT`, a nonempty overtaking path, and the
 opponent moving from behind to ahead, with both car centres inside the track and
 zero simulator collision flags. Collision flags are published on
@@ -81,6 +87,18 @@ zero simulator collision flags. Collision flags are published on
 Add `--controller overtake_aggressive` for
 the second profile. Reports and logs are written under `/tmp/maneuver-check` in
 the test container. The first simulation starts more slowly while Numba compiles.
+
+For the complete configured scenario sequence, run
+`test/check_scenario_workflow.py` in the sourced container. It checks all configured
+spawns, scenario CSVs, defensive telemetry columns, and final shutdown. The normal
+mode waits for actual overtakes/laps. Add `--controlled-transitions` for a quick
+workflow check using synthetic completion events on isolated manager inputs;
+that mode does not measure full-race performance or prove collision-free racing.
+
+The manager waits for the bridge to publish observations before its first spawn.
+Controllers clear old plans and filter state at each reset; the logger waits for
+fresh observations before writing rows to the new scenario's CSV. Final shutdown
+also stops the bridge and ignores late drive commands.
 
 ### Important Commands
 - **Build the simulator (when making any changes or on first install)**

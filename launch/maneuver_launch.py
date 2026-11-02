@@ -5,6 +5,7 @@ from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandle
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition
 from launch_ros.actions import Node
 
 
@@ -25,10 +26,12 @@ def generate_launch_description():
         pipeline_node(package='lidar_processing', executable='generate_candidate_trajectories.py'),
         pipeline_node(package='lidar_processing', executable='path_converter_node.py', parameters=[params]),
         pipeline_node(package='lidar_processing', executable='dynamic_mppi_node.py', parameters=[params]),
-        pipeline_node(package='env_manager', executable='main'),
+        pipeline_node(package='env_manager', executable='main',
+                      condition=IfCondition(LaunchConfiguration('scenario_manager'))),
         pipeline_node(package='data_logger', executable='data_logger'),
     ]
-    actions = [DeclareLaunchArgument('controller', default_value='overtake')]
+    actions = [DeclareLaunchArgument('controller', default_value='overtake'),
+               DeclareLaunchArgument('scenario_manager', default_value='true')]
     # A dead planner must not leave the cars silently circling on fallback control.
     for node in nodes:
         actions.append(RegisterEventHandler(OnProcessExit(

@@ -1,5 +1,8 @@
 # Defensive branch and scenario-manager compatibility
 
+These are the historical preparation notes. For the completed integration and its
+validation limits, see [integration-verification.md](integration-verification.md).
+
 Prepared against `feature/defensive-maneuvering` at `40abe1a` and remote `main` at
 `e2de435`. No merge, commit, or push was performed during this preparation.
 
@@ -48,9 +51,9 @@ With main's current YAML, defaults are **one parallel Docker session, 24 scenari
 one lap per scenario, and a 3 m overtake margin**. These are separate concepts. Use
 `-NumSessions 3` explicitly if three parallel sessions are wanted after the merge.
 
-The working branch still uses its subscriber-only manager. These changes prepare
-the defensive nodes for main's manager; they do not activate main's reset system
-before the actual merge is approved.
+At the preparation stage the branch still used its subscriber-only manager. These
+changes prepared the defensive nodes for main's manager without activating main's
+reset system before integration was approved.
 
 ## Validation
 

@@ -1,6 +1,7 @@
 """Focused regressions; run in the sourced ROS container with unittest."""
 
 import unittest
+from types import SimpleNamespace
 import sys
 from pathlib import Path as FilePath
 
@@ -9,6 +10,8 @@ import rclpy
 from nav_msgs.msg import Odometry, Path
 from geometry_msgs.msg import PoseStamped
 from scipy.interpolate import splev
+from sensor_msgs.msg import LaserScan
+from overtake_controller.track_following import RacelineFollower
 
 from overtake_controller.interceptor import OvertakeInterceptorNode
 from frenet_frame_conv.frenet_node import FrenetNode
@@ -141,6 +144,21 @@ class ManeuverRegressions(unittest.TestCase):
         at_two_metres = np.interp(12.0, path[:, 1], path[:, 2])
         self.assertGreater(at_two_metres, 0.6)
         self.assertAlmostEqual(path[0, 2], 0.0)
+
+    def test_clearance_guard_preserves_a_clear_command_and_brakes_for_a_wall(self):
+        follower = RacelineFollower()
+        scan = LaserScan()
+        scan.angle_min, scan.angle_increment, scan.range_max = -2.35, 4.7 / 1080, 30.0
+        node = SimpleNamespace(scan_msg=scan, MAX_STEER_ANGLE=0.44, MAX_STEER_DELTA=0.07,
+                               opp_x=0.0, opp_y=0.0, opp_yaw=0.0, opp_speed=2.0,
+                               wheelbase=0.33, MAX_SPEED=2.34)
+        scan.ranges = [30.0] * 1080
+        turn, speed = follower.protect(node, 0.0, 2.0, 0.0)
+        self.assertEqual((turn, speed), (0.0, 2.0))
+        scan.ranges = [0.4] * 1080
+        turn, speed = follower.protect(node, 0.0, 2.0, 0.0)
+        self.assertEqual(speed, 0.0)
+        self.assertLessEqual(abs(turn), node.MAX_STEER_DELTA)
 
 
 if __name__ == '__main__':

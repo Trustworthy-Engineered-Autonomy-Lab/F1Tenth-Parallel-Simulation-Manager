@@ -34,6 +34,7 @@ from geometry_msgs.msg import Quaternion
 from ackermann_msgs.msg import AckermannDriveStamped
 from std_msgs.msg import Bool
 from tf2_ros import TransformBroadcaster
+from geometry_msgs.msg import PoseArray
 
 import gym
 import numpy as np
@@ -42,6 +43,9 @@ from transforms3d import euler
 class GymBridge(Node):
     def __init__(self):
         super().__init__('gym_bridge')
+        self.shutdown_requested = False
+        self.shutdown_sub = self.create_subscription(
+            Bool, '/env_manager/shutdown', self.shutdown_callback, 10)
 
         self.declare_parameter('ego_namespace')
         self.declare_parameter('ego_odom_topic')
@@ -66,6 +70,13 @@ class GymBridge(Node):
         self.declare_parameter('sy1')
         self.declare_parameter('stheta1')
         self.declare_parameter('kb_teleop')
+
+        self.scenario_reset_sub = self.create_subscription(
+            PoseArray,
+            '/env_manager/reset_scenario',
+            self.scenario_reset_callback,
+            10
+        )
 
         # check num_agents
         num_agents = self.get_parameter('num_agent').value
@@ -179,12 +190,88 @@ class GymBridge(Node):
                 10)
 
 
+    def scenario_reset_callback(self, msg):
+        if not self.has_opp:
+            self.get_logger().error(
+                "Scenario reset requires a two-agent simulation."
+            )
+            return
+
+        if len(msg.poses) != 2:
+            self.get_logger().error(
+                "Scenario reset requires exactly two poses: [ego, opponent]."
+            )
+            return
+
+        ego_msg = msg.poses[0]
+        opp_msg = msg.poses[1]
+
+        _, _, ego_theta = euler.quat2euler(
+            [
+                ego_msg.orientation.w,
+                ego_msg.orientation.x,
+                ego_msg.orientation.y,
+                ego_msg.orientation.z
+            ],
+            axes='sxyz'
+        )
+
+        _, _, opp_theta = euler.quat2euler(
+            [
+                opp_msg.orientation.w,
+                opp_msg.orientation.x,
+                opp_msg.orientation.y,
+                opp_msg.orientation.z
+            ],
+            axes='sxyz'
+        )
+
+        ego_pose = [
+            ego_msg.position.x,
+            ego_msg.position.y,
+            ego_theta
+        ]
+
+        opp_pose = [
+            opp_msg.position.x,
+            opp_msg.position.y,
+            opp_theta
+        ]
+
+        self.obs, _, self.done, _ = self.env.reset(
+            np.array([ego_pose, opp_pose])
+        )
+
+        # Clear old control commands after repositioning.
+        self.ego_requested_speed = 0.0
+        self.ego_steer = 0.0
+        self.opp_requested_speed = 0.0
+        self.opp_steer = 0.0
+
+        self._update_sim_state()
+
+        self.get_logger().info(
+            f"Scenario reset completed | ego={ego_pose} | opp={opp_pose}"
+        )
+
+
+    def shutdown_callback(self, msg):
+        if msg.data:
+            self.shutdown_requested = True
+            self.ego_requested_speed = self.ego_steer = 0.0
+            if self.has_opp:
+                self.opp_requested_speed = self.opp_steer = 0.0
+
     def drive_callback(self, drive_msg):
+        if self.shutdown_requested:
+            return
         self.ego_requested_speed = drive_msg.drive.speed
         self.ego_steer = drive_msg.drive.steering_angle
         self.ego_drive_published = True
 
     def opp_drive_callback(self, drive_msg):
+        if self.shutdown_requested:
+            return
         self.opp_requested_speed = drive_msg.drive.speed
         self.opp_steer = drive_msg.drive.steering_angle
         self.opp_drive_published = True
@@ -217,6 +304,8 @@ class GymBridge(Node):
             self._update_sim_state()
 
     def teleop_callback(self, twist_msg):
+        if self.shutdown_requested:
+            return
         if not self.ego_drive_published:
             self.ego_drive_published = True
 

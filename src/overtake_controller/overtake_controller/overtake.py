@@ -175,8 +175,11 @@ class OpponentOvertakeController(Node):
             speed = min(speed, max(0.0, self.ego_speed + 0.8 * (forward - 1.5)))
 
         # Final limits and rate clamping
+        previous_steer = self.prev_steer
         steering = self.rate_limit_steering(steering)
         steering = np.clip(steering, -self.MAX_STEER_ANGLE, self.MAX_STEER_ANGLE)
+        steering, speed = self.raceline_follower.protect(self, steering, speed, previous_steer)
+        self.prev_steer = steering
         
         drive_msg.drive.steering_angle = float(steering)
         drive_msg.drive.speed = float(max(0.0, speed))

@@ -123,7 +123,8 @@ def main():
         commands = [
             ['ros2', 'run', 'f1tenth_gym_ros', 'gym_bridge', '--ros-args',
              '-r', '__node:=bridge', '--params-file', '/sim_ws/src/f1tenth_gym_ros/config/sim.yaml'],
-            ['ros2', 'launch', 'f1tenth_gym_ros', 'maneuver_launch.py', 'controller:=' + args.controller],
+            ['ros2', 'launch', 'f1tenth_gym_ros', 'maneuver_launch.py',
+             'scenario_manager:=false', 'controller:=' + args.controller],
         ]
         for name, command in zip(['bridge', 'pipeline'], commands):
             log = (output / (name + '.log')).open('w')
