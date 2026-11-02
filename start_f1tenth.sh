@@ -1,11 +1,32 @@
 #!/usr/bin/env bash
 set -e
 
-NUM_SESSIONS=3
-MAX_LAPS=3
 IMAGE_NAME="f1tenth_gym_ros"
 REPO_ROOT="$(pwd)"
 RESULTS_ROOT="$REPO_ROOT/results"
+CONFIG_FILE="$REPO_ROOT/config/manager.yaml"
+
+# default values if the YAML keys are missing
+DEFAULT_SESSIONS=3
+DEFAULT_LAPS=3
+
+# Read the YAML, falling back on the defaults
+if [[ -f "$CONFIG_FILE" ]]; then
+    NUM_SESSIONS=$(yq e '.num_sessions' "$CONFIG_FILE")
+    MAX_LAPS=$(yq e '.max_laps' "$CONFIG_FILE")
+    NUM_SIMULATIONS=$(yq e '.num_simulations' "$CONFIG_FILE")
+    OVERTAKE_MARGIN=$(yq e '.overtake_margin' "$CONFIG_FILE")
+    # Empty strings mean the key is not present
+    [[ -z $NUM_SESSIONS ]] && NUM_SESSIONS=$DEFAULT_SESSIONS
+    [[ -z $MAX_LAPS ]] && MAX_LAPS=$DEFAULT_LAPS
+    [[ -z $NUM_SIMULATIONS ]] && NUM_SIMULATIONS=$DEFAULT_SIMULATIONS
+    [[ -z $OVERTAKE_MARGIN ]] && OVERTAKE_MARGIN=$DEFAULT_OVERTAKE_MARGIN
+else
+    NUM_SESSIONS=$DEFAULT_SESSIONS
+    MAX_LAPS=$DEFAULT_LAPS
+    NUM_SIMULATIONS=$DEFAULT_SIMULATIONS
+    OVERTAKE_MARGIN=$DEFAULT_OVERTAKE_MARGIN
+fi
 
 mkdir -p "$RESULTS_ROOT"
 
@@ -40,6 +61,9 @@ for i in $(seq 1 "$NUM_SESSIONS"); do
     -e SESSION_ID="$i" \
     -e ROS_DOMAIN_ID="$i" \
     -e MAX_LAPS="$MAX_LAPS" \
+    -e NUM_SIMULATIONS="$NUM_SIMULATIONS" \
+    -e OVERTAKE_MARGIN="$OVERTAKE_MARGIN" \
+    -e CONFIG_FILE="/sim_ws/src/f1tenth_gym_ros/config/manager.yaml" \
     -e RESULTS_DIR="/sim_ws/results/session_$i" \
     -e ATTACH_TMUX=0 \
     -v "$REPO_ROOT:/sim_ws/src/f1tenth_gym_ros" \

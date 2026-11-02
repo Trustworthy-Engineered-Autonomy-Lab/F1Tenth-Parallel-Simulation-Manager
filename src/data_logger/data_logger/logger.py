@@ -1,34 +1,32 @@
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Int32, Bool, Float32MultiArray
+from std_msgs.msg import Int32, Bool, String
 from geometry_msgs.msg import Pose2D
+from nav_msgs.msg import Path
 import csv
 import os
-import math
-from nav_msgs.msg import Path
-from std_msgs.msg import String
-
+import sys
 
 class DataLogger(Node):
     def __init__(self):
         super().__init__('data_logger')
 
-        # Configuration
-        on_sim = True
-
-        # Storage - SINGLE CSV
         self.session_id = os.getenv("SESSION_ID", "1")
+        self.num_simulations = int(os.getenv("NUM_SIMULATIONS", "3"))
         self.results_dir = os.getenv("RESULTS_DIR", f"/sim_ws/results/session_{self.session_id}")
-        self.data_dir = os.path.join(self.results_dir, "data")
-        os.makedirs(self.data_dir, exist_ok=True)
-
-        self.session_csv = os.path.join(self.data_dir, f"session_{self.session_id}_data.csv")
-        self._init_csv()
+        
+        os.makedirs(self.results_dir, exist_ok=True)
 
         # State Variables
+        self.current_sim = 1
+        self.current_csv = None
+        self.csv_file = None
+        self.csv_writer = None
+        
         self.imm_active = False
         self.lap_num = 0
+        self.overtake_num = 0
 
         self.ego_x, self.ego_y = 0.0, 0.0
         self.ego_vel = 0.0
@@ -39,28 +37,20 @@ class DataLogger(Node):
         self.opp_s, self.opp_d = 0.0, 0.0
 
         self.imm_trajectory = []
-
-        # Overtake tracking
-        self.overtake_num = 0  # Starts at 0, increments on each overtake
         self.last_opp_ahead = False
-        self.last_overtake_time = 0.0
-        self.max_track_length = 359.85  # Default track length
+        self.max_track_length = 359.85
 
-        # Topics
-        ego_odom = '/ego_racecar/odom' if on_sim else 'TODO'
-        opp_odom = '/opp_racecar/odom' if on_sim else 'TODO'
-        ego_frenet = '/ego_racecar/frenet'
-        opp_frenet = '/opp_racecar/frenet'
-        imm_path_topic = '/imm_path'
-
-        # Subscriptions (NO iteration_num - single CSV only)
+        # Subscriptions
+        self.create_subscription(Int32, '/env_manager/sim_num', self.sim_num_cb, 10)
         self.create_subscription(Int32, '/env_manager/lap_num', self.lap_num_cb, 10)
-        self.create_subscription(Odometry, ego_odom, self.ego_odom_cb, 10)
-        self.create_subscription(Odometry, opp_odom, self.opp_odom_cb, 10)
-        self.create_subscription(Pose2D, ego_frenet, self.ego_frenet_cb, 10)
-        self.create_subscription(Pose2D, opp_frenet, self.opp_frenet_cb, 10)
-        self.create_subscription(Path, imm_path_topic, self.imm_cb, 10)
+        self.create_subscription(Odometry, '/ego_racecar/odom', self.ego_odom_cb, 10)
+        self.create_subscription(Odometry, '/opp_racecar/odom', self.opp_odom_cb, 10)
+        self.create_subscription(Pose2D, '/ego_racecar/frenet', self.ego_frenet_cb, 10)
+        self.create_subscription(Pose2D, '/opp_racecar/frenet', self.opp_frenet_cb, 10)
+        self.create_subscription(Path, '/imm_path', self.imm_cb, 10)
         self.create_subscription(String, '/imm_active', self.imm_active_cb, 10)
+        self.create_subscription(Bool, '/env_manager/reset', self.reset_cb, 10)
+        self.create_subscription(Bool, '/env_manager/shutdown', self.shutdown_cb, 10)
 
         # Publisher
         self.overtake_pub = self.create_publisher(Bool, '/data_logger/overtake_detected', 10)
@@ -68,66 +58,80 @@ class DataLogger(Node):
         # Timer
         self.create_timer(0.05, self.log_to_csv)
 
-        self.get_logger().info(f"DataLogger started | session={self.session_id} | Single continuous CSV with overtake tracking")
+        # Initialize first simulation CSV
+        self._init_csv_for_sim(1)
 
-    def _init_csv(self):
-        """Initialize single session CSV file with overtake_num column"""
-        with open(self.session_csv, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                'timestamp', 'lap', 'overtake_num',
-                'ego_x', 'ego_y', 'ego_vel', 'ego_s', 'ego_d',
-                'opp_x', 'opp_y', 'opp_vel', 'opp_s', 'opp_d',
-                'rel_x', 'rel_y', 'rel_vel', 'rel_s', 'rel_d',
-                'imm_trajectory', 'imm_active'
-            ])
+        self.get_logger().info(
+            f"DataLogger started | Session={self.session_id} | "
+            f"Num Sims={self.num_simulations} | Results Dir={self.results_dir}"
+        )
+
+    def _init_csv_for_sim(self, sim_num: int):
+        """Initialize CSV file for a specific simulation"""
+        if self.csv_file:
+            self.csv_file.close()
+
+        self.current_sim = sim_num
+        self.current_csv = os.path.join(self.results_dir, f"simulation_{sim_num}.csv")
+        
+        self.get_logger().info(f"📝 Initializing CSV for simulation {sim_num}: {self.current_csv}")
+
+        self.csv_file = open(self.current_csv, 'w', newline='')
+        self.csv_writer = csv.writer(self.csv_file)
+        self.csv_writer.writerow([
+            'timestamp', 'lap', 'overtake_num',
+            'ego_x', 'ego_y', 'ego_vel', 'ego_s', 'ego_d',
+            'opp_x', 'opp_y', 'opp_vel', 'opp_s', 'opp_d',
+            'rel_x', 'rel_y', 'rel_vel', 'rel_s', 'rel_d',
+            'imm_trajectory', 'imm_active'
+        ])
+        self.csv_file.flush()
+
+    def sim_num_cb(self, msg):
+        """Handle new simulation number"""
+        if msg.data != self.current_sim:
+            self.get_logger().info(f"🔄 Switching to simulation {msg.data}")
+            self._init_csv_for_sim(msg.data)
+
+    def reset_cb(self, msg):
+        """Handle reset event"""
+        if msg.data:
+            self.get_logger().info("🔄 Reset signal received")
+
+    def shutdown_cb(self, msg):
+        """Handle graceful shutdown"""
+        if msg.data:
+            self.get_logger().info("📤 Shutdown signal received - closing files and exiting")
+            if self.csv_file:
+                self.csv_file.close()
+            sys.exit(0)
 
     def _detect_and_increment_overtake(self) -> None:
-        """
-        Increments ``self.overtake_num`` exactly when the opponent car
-        goes from behind to ahead of the ego car.
-        """
-
-        # guard against stale data
+        """Detect overtake event"""
         if self.ego_s == 0.0 or self.opp_s == 0.0:
             return
 
-        # raw relative distance (opponent – ego)
         delta = self.opp_s - self.ego_s
-
-        # wrap‑around to keep the difference in [‑L/2 , +L/2]
         max_s = self.max_track_length
-        if delta >  max_s / 2.0:
-            delta -= max_s           # opponent wrapped past 0
+        
+        if delta > max_s / 2.0:
+            delta -= max_s
         elif delta < -max_s / 2.0:
-            delta += max_s           # ego wrapped past 0
+            delta += max_s
 
-        # who is ahead *after* we fixed wrap‑around?
-        opp_ahead_now = delta > 0.0   # True if opponent is ahead
+        opp_ahead_now = delta > 0.0
 
-        # DEBUG – you can delete this line in production
-        print(f"[DEBUG] ego_s={self.ego_s:.2f}  opp_s={self.opp_s:.2f}  "
-              f"delta={delta:.2f}  opp_ahead_now={opp_ahead_now}  "
-              f"last_opp_ahead={self.last_opp_ahead}")
-
-        # crossing test: from behind (False) → ahead (True)
         if opp_ahead_now and not self.last_opp_ahead:
             self.overtake_num += 1
-
-            # log the event – appears in *rosout*
-            self.get_logger().info(
-                f"🏁 OVERTAKE #{self.overtake_num} DETECTED! Opp is {delta:.1f} m ahead"
-            )
-
-            # publish a Bool so other nodes can react
+            self.get_logger().info(f"🏁 OVERTAKE #{self.overtake_num} DETECTED! Opp {delta:.1f}m ahead")
+            
             msg = Bool()
             msg.data = True
             self.overtake_pub.publish(msg)
 
-        # update the state flag for the next callback
         self.last_opp_ahead = opp_ahead_now
 
-    # Subscriber callbacks
+    # Callbacks
     def imm_active_cb(self, msg):
         self.imm_active = (msg.data == "True")
 
@@ -151,55 +155,33 @@ class DataLogger(Node):
     def opp_frenet_cb(self, msg):
         self.opp_s = msg.x
         self.opp_d = msg.y
-        
-        # Check for overtakes whenever opponent position updates
         self._detect_and_increment_overtake()
 
     def imm_cb(self, msg):
         waypoints = [(pose.pose.position.x, pose.pose.position.y) for pose in msg.poses]
         self.imm_trajectory = waypoints
 
-    # Timer: write to single CSV
     def log_to_csv(self):
-        # Snapshot all values atomically to prevent mid-update writes
-        timestamp   = self.get_clock().now().nanoseconds / 1e9
-        lap         = self.lap_num
-        overtake    = self.overtake_num
-        ego_x       = self.ego_x
-        ego_y       = self.ego_y
-        ego_vel     = self.ego_vel
-        ego_s       = self.ego_s
-        ego_d       = self.ego_d
-        opp_x       = self.opp_x
-        opp_y       = self.opp_y
-        opp_vel     = self.opp_vel
-        opp_s       = self.opp_s
-        opp_d       = self.opp_d
-        imm_traj    = list(self.imm_trajectory)
-        imm_active  = self.imm_active
+        """Write snapshot to current simulation CSV"""
+        if not self.csv_writer:
+            return
 
-        rel_x   = opp_x - ego_x
-        rel_y   = opp_y - ego_y
-        rel_vel = opp_vel - ego_vel
-        rel_s   = opp_s - ego_s
-        rel_d   = opp_d - ego_d
+        timestamp = self.get_clock().now().nanoseconds / 1e9
+        
+        rel_x = self.opp_x - self.ego_x
+        rel_y = self.opp_y - self.ego_y
+        rel_vel = self.opp_vel - self.ego_vel
+        rel_s = self.opp_s - self.ego_s
+        rel_d = self.opp_d - self.ego_d
 
-        with open(self.session_csv, 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                timestamp, lap, overtake,
-                ego_x, ego_y, ego_vel, ego_s, ego_d,
-                opp_x, opp_y, opp_vel, opp_s, opp_d,
-                rel_x, rel_y, rel_vel, rel_s, rel_d,
-                imm_traj, imm_active
-            ])
-
-    # publisher
-    def publish_overtake(self):
-        msg = Bool()
-        msg.data = True
-        self.overtake_pub.publish(msg)
-
+        self.csv_writer.writerow([
+            timestamp, self.lap_num, self.overtake_num,
+            self.ego_x, self.ego_y, self.ego_vel, self.ego_s, self.ego_d,
+            self.opp_x, self.opp_y, self.opp_vel, self.opp_s, self.opp_d,
+            rel_x, rel_y, rel_vel, rel_s, rel_d,
+            self.imm_trajectory, self.imm_active
+        ])
+        self.csv_file.flush()
 
 def main(args=None):
     rclpy.init(args=args)
@@ -209,10 +191,11 @@ def main(args=None):
     except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
     finally:
+        if node.csv_file:
+            node.csv_file.close()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()

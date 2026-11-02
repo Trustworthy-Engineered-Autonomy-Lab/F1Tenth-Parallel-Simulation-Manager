@@ -1,0 +1,38 @@
+# -----------
+# This file has config settings for the simulation manager.
+# -----------
+
+# -----------
+#     -> SESSION - The entire docker session
+#
+#         -> SIMULATION - Each simulation is run independently and has its own CSV file
+#            (can modify each simulation states with the sim_start denoting starting coords)
+#
+#             -> LAPS - This is the number of laps per simulation before it resets
+#                (can also set overtake_reset to true to reset on opp overtaking the ego)
+# -----------
+
+num_sessions: 3     # how many parallel Docker sessions to launch (default: 3)
+num_simulations: 3  # how many simulations will be run on each docker session
+max_laps: 2         # how many laps each session should run before ending the simulation
+
+lap_detection:
+  method: "bubble"           # "bubble" or "point"
+  bubble_radius: 5.0         # meters (for bubble method)
+  track_length: 359.85       # fallback if not using bubble
+
+overtake_margin: 3.0 # meters ahead to count as an overtake
+
+# Format: ego: [ego_x, ego_y, ego_theta]
+#         opp: [opp_x, opp_y, opp_theta]
+# Defaults: ego=[4, 1, 0], opp=[0, 0, 0]
+sim_start:  
+  s_1:
+    ego: [4, 1, 0]
+    opp: [0, 0, 0]
+  s_2:
+    ego: [5, 1, 0]
+    opp: [0, 0, 0]
+  s_3:
+    ego: [6, 1, 0]
+    opp: [1, 0, 0]
