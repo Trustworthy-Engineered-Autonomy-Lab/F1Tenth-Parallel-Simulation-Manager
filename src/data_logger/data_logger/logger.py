@@ -1,9 +1,8 @@
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Int32, Bool, String
+from std_msgs.msg import Int32, Bool
 from geometry_msgs.msg import Pose2D
-from nav_msgs.msg import Path
 import csv
 import os
 import sys
@@ -24,7 +23,6 @@ class DataLogger(Node):
         self.csv_file = None
         self.csv_writer = None
         
-        self.imm_active = False
         self.lap_num = 0
         self.overtake_num = 0
 
@@ -36,7 +34,6 @@ class DataLogger(Node):
         self.opp_vel = 0.0
         self.opp_s, self.opp_d = 0.0, 0.0
 
-        self.imm_trajectory = []
         self.last_opp_ahead = False
         self.max_track_length = 359.85
 
@@ -47,8 +44,6 @@ class DataLogger(Node):
         self.create_subscription(Odometry, '/opp_racecar/odom', self.opp_odom_cb, 10)
         self.create_subscription(Pose2D, '/ego_racecar/frenet', self.ego_frenet_cb, 10)
         self.create_subscription(Pose2D, '/opp_racecar/frenet', self.opp_frenet_cb, 10)
-        self.create_subscription(Path, '/imm_path', self.imm_cb, 10)
-        self.create_subscription(String, '/imm_active', self.imm_active_cb, 10)
         self.create_subscription(Bool, '/env_manager/reset', self.reset_cb, 10)
         self.create_subscription(Bool, '/env_manager/shutdown', self.shutdown_cb, 10)
 
@@ -82,8 +77,7 @@ class DataLogger(Node):
             'timestamp', 'lap', 'overtake_num',
             'ego_x', 'ego_y', 'ego_vel', 'ego_s', 'ego_d',
             'opp_x', 'opp_y', 'opp_vel', 'opp_s', 'opp_d',
-            'rel_x', 'rel_y', 'rel_vel', 'rel_s', 'rel_d',
-            'imm_trajectory', 'imm_active'
+            'rel_x', 'rel_y', 'rel_vel', 'rel_s', 'rel_d'
         ])
         self.csv_file.flush()
 
@@ -97,6 +91,8 @@ class DataLogger(Node):
         """Handle reset event"""
         if msg.data:
             self.get_logger().info("🔄 Reset signal received")
+            self.overtake_num = 0          # Reset overtake counter for new simulation
+            self.last_opp_ahead = False    # Reset overtake state tracking too
 
     def shutdown_cb(self, msg):
         """Handle graceful shutdown"""
@@ -132,9 +128,6 @@ class DataLogger(Node):
         self.last_opp_ahead = opp_ahead_now
 
     # Callbacks
-    def imm_active_cb(self, msg):
-        self.imm_active = (msg.data == "True")
-
     def lap_num_cb(self, msg):
         self.lap_num = msg.data
 
@@ -157,10 +150,6 @@ class DataLogger(Node):
         self.opp_d = msg.y
         self._detect_and_increment_overtake()
 
-    def imm_cb(self, msg):
-        waypoints = [(pose.pose.position.x, pose.pose.position.y) for pose in msg.poses]
-        self.imm_trajectory = waypoints
-
     def log_to_csv(self):
         """Write snapshot to current simulation CSV"""
         if not self.csv_writer:
@@ -178,8 +167,7 @@ class DataLogger(Node):
             timestamp, self.lap_num, self.overtake_num,
             self.ego_x, self.ego_y, self.ego_vel, self.ego_s, self.ego_d,
             self.opp_x, self.opp_y, self.opp_vel, self.opp_s, self.opp_d,
-            rel_x, rel_y, rel_vel, rel_s, rel_d,
-            self.imm_trajectory, self.imm_active
+            rel_x, rel_y, rel_vel, rel_s, rel_d
         ])
         self.csv_file.flush()
 
