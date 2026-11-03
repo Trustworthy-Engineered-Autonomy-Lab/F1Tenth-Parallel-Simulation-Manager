@@ -90,6 +90,11 @@ class OpponentOvertakeController(Node):
 
     # ---------------- TELEMETRY CALLBACKS ----------------
 
+    def configure_experiment(self, state):
+        ratio = state['opp_speed'] / self.MAX_SPEED
+        for name in ('MAX_SPEED', 'HIGH_SPEED', 'MEDIUM_SPEED', 'DEF_LOW_SPEED', 'EVASIVE_SPEED'):
+            setattr(self, name, getattr(self, name) * ratio)
+
     def reset_scenario(self, _message):
         self.current_mode = 'FTG'
         self.overtake_spline = None
@@ -119,6 +124,8 @@ class OpponentOvertakeController(Node):
         self.ego_speed = math.hypot(msg.twist.twist.linear.x, msg.twist.twist.linear.y)
 
     def spline_callback(self, msg):
+        if self.lifecycle.phase != 'RUNNING':
+            return
         if len(msg.poses) > 5:
             self.overtake_spline = msg.poses
         else:

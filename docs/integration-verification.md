@@ -1,5 +1,8 @@
 # Combined defensive driving and 24-scenario runner
 
+This records the original merge verification. The later experiment-protocol
+changes and their verification are documented in [experiment-protocol.md](experiment-protocol.md).
+
 Integrated the feature branch at `584e494` with main at `e2de435` on 2026-11-02.
 Both histories and their recorded experiment outputs are retained.
 

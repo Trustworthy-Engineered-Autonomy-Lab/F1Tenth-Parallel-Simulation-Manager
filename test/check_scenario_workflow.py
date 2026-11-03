@@ -25,6 +25,7 @@ from geometry_msgs.msg import PoseArray, Pose2D
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, Int32, String
 from visualization_msgs.msg import MarkerArray
+from lidar_processing.experiment_protocol import protocol_qos
 
 ROOT = Path('/sim_ws/src/f1tenth_gym_ros')
 
@@ -41,6 +42,8 @@ class WorkflowProbe(Node):
         self.started = time.monotonic()
         self.controlled = controlled
         self.control_ready = False
+        self.experiment_phase = None
+        self.active_since = None
         self.last_seed = 0
         self.trigger_steps = {}
         self.ego_test_pub = self.create_publisher(Pose2D, '/workflow_test/ego_frenet', 10)
@@ -48,6 +51,7 @@ class WorkflowProbe(Node):
         self.odom_test_pub = self.create_publisher(Odometry, '/workflow_test/ego_odom', 10)
         self.create_subscription(PoseArray, '/env_manager/reset_scenario', self.reset, 10)
         self.create_subscription(Bool, '/env_manager/shutdown', self.shutdown, 10)
+        self.create_subscription(String, '/env_manager/experiment_state', self.experiment_state, protocol_qos())
         self.create_subscription(String, '/mppi_state', self.state, 10)
         self.create_subscription(MarkerArray, '/ego_best_defensive_spline', self.defense, 10)
         for car in ('ego', 'opp'):
@@ -68,6 +72,8 @@ class WorkflowProbe(Node):
         if found is None:
             raise AssertionError(f'Unexpected starting pair: {pairs}')
         self.scenario = found
+        self.experiment_phase = None
+        self.active_since = None
         self.previous.clear()
         self.scenarios[found] = {
             'started_at': time.monotonic(), 'elapsed_s': 0,
@@ -83,6 +89,13 @@ class WorkflowProbe(Node):
     def shutdown(self, msg):
         if msg.data:
             self.finished = True
+
+    def experiment_state(self, message):
+        state = json.loads(message.data)
+        if state['scenario'] == self.scenario:
+            self.experiment_phase = state['phase']
+            if state['phase'] == 'RUNNING' and self.active_since is None:
+                self.active_since = time.monotonic()
 
     def state(self, msg):
         self.control_ready = True
@@ -142,9 +155,15 @@ class WorkflowProbe(Node):
                 self.ego_test_pub.publish(Pose2D(x=100.0))
                 self.opp_test_pub.publish(Pose2D(x=99.0))
             return
-        age = self.scenarios[self.scenario]['elapsed_s']
-        step = min(2, int((age - 3.5) / 0.25))
-        if age < 3.5 or self.trigger_steps.get(self.scenario) == step:
+        if self.experiment_phase != 'RUNNING':
+            if time.monotonic() - self.last_seed > 0.25:
+                self.last_seed = time.monotonic()
+                self.ego_test_pub.publish(Pose2D(x=100.0))
+                self.opp_test_pub.publish(Pose2D(x=99.0))
+            return
+        age = time.monotonic() - self.active_since
+        step = min(2, int((age - 0.5) / 0.25))
+        if age < 0.5 or self.trigger_steps.get(self.scenario) == step:
             return
         self.trigger_steps[self.scenario] = step
         if self.scenario % 2:
@@ -161,6 +180,13 @@ class WorkflowProbe(Node):
             if step == 1:
                 message.pose.pose.position.x += self.config['lap_detection']['bubble_radius'] + 1.0
             self.odom_test_pub.publish(message)
+            if step == 1:
+                # Only this explicit controlled mode advances isolated manager inputs.
+                # A full unwrapped lap is now required in addition to the bubble crossing.
+                length = self.config['lap_detection']['track_length']
+                for point in range(1, 13):
+                    self.ego_test_pub.publish(Pose2D(x=(100.0 + length * point / 12) % length))
+                    time.sleep(0.01)
 
 
 def main():

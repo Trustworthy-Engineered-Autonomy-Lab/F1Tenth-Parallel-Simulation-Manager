@@ -15,6 +15,8 @@
 num_sessions: 1     # how many parallel Docker sessions to launch (default: 3)
 num_simulations: 24  # how many simulations will be run on each docker session
 max_laps: 1         # how many laps each simulation should run max (resets after 1 lap IF no overtake)
+reset_settle_seconds: 2.0
+imm_initialization_seconds: 1.5  # continuous fresh observations before defense/passing
 
 lap_detection:
   method: "bubble"           # "bubble" or "point"
@@ -30,72 +32,120 @@ sim_start:
   s_1:
     ego: [-26.6065, -6.3993, 0.2627] # [ego_x, ego_y, ego_theta]
     opp: [-27.9979, -7.2396, 0.2628] # [opp_x, opp_y, opp_theta]
+    ego_speed: 0.8  # m/s; initial velocity and controller target
+    opp_speed: 1.2  # must exceed ego_speed; safety braking can reduce actual speed
   s_2:
     ego: [-31.6663, -7.7479, 0.2403]
     opp: [-33.0355, -8.457, 0.0785]
+    ego_speed: 1.0  # m/s; initial velocity and controller target
+    opp_speed: 1.4  # must exceed ego_speed; safety braking can reduce actual speed
   s_3:
     ego: [-2.4736, 0.0898, 0.263]
     opp: [-4.393, -0.4268, 0.2628]
+    ego_speed: 1.2  # m/s; initial velocity and controller target
+    opp_speed: 1.6  # must exceed ego_speed; safety braking can reduce actual speed
   s_4:
     ego: [16.1836, 5.2573, 0.3789]
     opp: [14.368, 4.6369, 0.2895]
+    ego_speed: 0.8  # m/s; initial velocity and controller target
+    opp_speed: 1.2  # must exceed ego_speed; safety braking can reduce actual speed
   s_5:
     ego: [20.9294, 17.5381, 1.8624]
     opp: [21.8072, 16.1719, 1.8588]
+    ego_speed: 1.0  # m/s; initial velocity and controller target
+    opp_speed: 1.4  # must exceed ego_speed; safety braking can reduce actual speed
   s_6:
     ego: [22.6637, 9.7698, 1.276]
     opp: [22.3961, 8.4615, 0.833]
+    ego_speed: 1.2  # m/s; initial velocity and controller target
+    opp_speed: 1.6  # must exceed ego_speed; safety braking can reduce actual speed
   s_7:
     ego: [3.0661, 24.4617, -3.117]
     opp: [5.0533, 24.5108, -3.1171]
+    ego_speed: 0.8  # m/s; initial velocity and controller target
+    opp_speed: 1.2  # must exceed ego_speed; safety braking can reduce actual speed
   s_8:
     ego: [-13.835, 24.2548, -3.126]
     opp: [-11.8636, 24.2648, 3.136]
+    ego_speed: 1.0  # m/s; initial velocity and controller target
+    opp_speed: 1.4  # must exceed ego_speed; safety braking can reduce actual speed
   s_9:
     ego: [-30.7131, 18.4919, -2.2577]
     opp: [-30.0594, 19.9497, -2.3174]
+    ego_speed: 1.2  # m/s; initial velocity and controller target
+    opp_speed: 1.6  # must exceed ego_speed; safety braking can reduce actual speed
   s_10:
     ego: [-39.3056, 15.4735, 2.771]
     opp: [-37.5634, 15.5225, 3.0475]
+    ego_speed: 0.8  # m/s; initial velocity and controller target
+    opp_speed: 1.2  # must exceed ego_speed; safety braking can reduce actual speed
   s_11:
     ego: [-45.0149, 22.1675, 2.099]
     opp: [-44.0182, 20.451, 2.0951]
+    ego_speed: 1.0  # m/s; initial velocity and controller target
+    opp_speed: 1.4  # must exceed ego_speed; safety braking can reduce actual speed
   s_12:
     ego: [-48.5574, 34.9703, 1.0991]
     opp: [-49.1948, 32.8475, 1.4485]
+    ego_speed: 1.2  # m/s; initial velocity and controller target
+    opp_speed: 1.6  # must exceed ego_speed; safety braking can reduce actual speed
   s_13:
     ego: [-30.835, 36.0023, -0.1185]
     opp: [-32.3269, 36.6387, -0.1298]
+    ego_speed: 0.8  # m/s; initial velocity and controller target
+    opp_speed: 1.2  # must exceed ego_speed; safety braking can reduce actual speed
   s_14:
     ego: [-13.3978, 43.3055, 1.0182]
     opp: [-14.6484, 42.3047, 0.913]
+    ego_speed: 1.0  # m/s; initial velocity and controller target
+    opp_speed: 1.4  # must exceed ego_speed; safety braking can reduce actual speed
   s_15:
     ego: [-24.4407, 48.2544, 3.1027]
     opp: [-22.4544, 48.1749, 3.0997]
+    ego_speed: 1.2  # m/s; initial velocity and controller target
+    opp_speed: 1.6  # must exceed ego_speed; safety braking can reduce actual speed
   s_16:
     ego: [-12.8746, 46.6328, 2.1197]
     opp: [-12.6974, 44.8276, 1.3115]
+    ego_speed: 0.8  # m/s; initial velocity and controller target
+    opp_speed: 1.2  # must exceed ego_speed; safety braking can reduce actual speed
   s_17:
     ego: [-50.6589, 52.1675, 2.9468]
     opp: [-49.214, 51.4233, 2.946]
+    ego_speed: 1.0  # m/s; initial velocity and controller target
+    opp_speed: 1.4  # must exceed ego_speed; safety braking can reduce actual speed
   s_18:
     ego: [-56.2394, 53.2191, 2.9938]
     opp: [-54.7816, 52.5169, 2.9584]
+    ego_speed: 1.2  # m/s; initial velocity and controller target
+    opp_speed: 1.6  # must exceed ego_speed; safety braking can reduce actual speed
   s_19:
     ego: [-71.904, 47.3664, -0.7868]
     opp: [-73.3048, 48.7768, -0.7943]
+    ego_speed: 0.8  # m/s; initial velocity and controller target
+    opp_speed: 1.2  # must exceed ego_speed; safety braking can reduce actual speed
   s_20:
     ego: [-75.3318, 52.224, -1.9337]
     opp: [-73.915, 53.1994, -2.8891]
+    ego_speed: 1.0  # m/s; initial velocity and controller target
+    opp_speed: 1.4  # must exceed ego_speed; safety braking can reduce actual speed
   s_21:
     ego: [-56.1011, 26.1718, -1.1409]
     opp: [-56.3429, 27.7791, -1.1411]
+    ego_speed: 1.2  # m/s; initial velocity and controller target
+    opp_speed: 1.6  # must exceed ego_speed; safety braking can reduce actual speed
   s_22:
     ego: [-59.1517, 32.5793, -1.0553]
     opp: [-59.5868, 34.1562, -0.9962]
+    ego_speed: 0.8  # m/s; initial velocity and controller target
+    opp_speed: 1.2  # must exceed ego_speed; safety braking can reduce actual speed
   s_23:
     ego: [-44.6889, 5.4501, -0.9496]
     opp: [-45.845, 7.0672, -0.9511]
+    ego_speed: 1.0  # m/s; initial velocity and controller target
+    opp_speed: 1.4  # must exceed ego_speed; safety braking can reduce actual speed
   s_24:
     ego: [-34.4785, -8.5466, -0.4243]
     opp: [-35.8499, -7.2425, -0.9848]
+    ego_speed: 1.2  # m/s; initial velocity and controller target
+    opp_speed: 1.6  # must exceed ego_speed; safety braking can reduce actual speed

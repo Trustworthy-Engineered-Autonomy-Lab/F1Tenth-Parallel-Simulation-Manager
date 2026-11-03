@@ -32,7 +32,9 @@ from geometry_msgs.msg import TransformStamped
 from geometry_msgs.msg import Transform
 from geometry_msgs.msg import Quaternion
 from ackermann_msgs.msg import AckermannDriveStamped
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
+import json
+from lidar_processing.experiment_protocol import protocol_qos
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import PoseArray
 
@@ -44,6 +46,11 @@ class GymBridge(Node):
     def __init__(self):
         super().__init__('gym_bridge')
         self.shutdown_requested = False
+        self.experiment_state = None
+        self.applied_reset_stamp_ns = 0
+        self.seeded_reset_stamp_ns = None
+        self.create_subscription(String, '/env_manager/experiment_state',
+                                 self.experiment_state_callback, protocol_qos())
         self.shutdown_sub = self.create_subscription(
             Bool, '/env_manager/shutdown', self.shutdown_callback, 10)
 
@@ -191,6 +198,7 @@ class GymBridge(Node):
 
 
     def scenario_reset_callback(self, msg):
+        self.applied_reset_stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
         if not self.has_opp:
             self.get_logger().error(
                 "Scenario reset requires a two-agent simulation."
@@ -319,11 +327,41 @@ class GymBridge(Node):
             self.ego_steer = 0.0
 
     def drive_timer_callback(self):
+        if self.experiment_state:
+            state = self.experiment_state
+            if state['phase'] in ('FINISHED', 'ERROR'):
+                self.ego_requested_speed = self.opp_requested_speed = 0.0
+                for agent in self.env.sim.agents:
+                    agent.state[3] = agent.state[5] = 0.0
+                for key in ('linear_vels_x', 'linear_vels_y', 'ang_vels_z'):
+                    self.obs[key] = [0.0] * len(self.env.sim.agents)
+                self._update_sim_state()
+                return
+            if state['phase'] not in ('WARMUP', 'RUNNING'):
+                return
+            if state['reset_stamp_ns'] != self.applied_reset_stamp_ns:
+                return
+            if self.seeded_reset_stamp_ns != self.applied_reset_stamp_ns:
+                # f110_gym RaceCar state: x,y,steer,velocity,yaw,yaw_rate,slip.
+                # Seed the actual model state, not just a requested drive speed.
+                for agent, speed in zip(self.env.sim.agents,
+                                        (state['ego_speed'], state['opp_speed'])):
+                    agent.state[3] = speed
+                self.ego_requested_speed = state['ego_speed']
+                self.opp_requested_speed = state['opp_speed']
+                self.ego_drive_published = self.opp_drive_published = True
+                self.seeded_reset_stamp_ns = self.applied_reset_stamp_ns
         if self.ego_drive_published and not self.has_opp:
             self.obs, _, self.done, _ = self.env.step(np.array([[self.ego_steer, self.ego_requested_speed]]))
         elif self.ego_drive_published and self.has_opp and self.opp_drive_published:
             self.obs, _, self.done, _ = self.env.step(np.array([[self.ego_steer, self.ego_requested_speed], [self.opp_steer, self.opp_requested_speed]]))
         self._update_sim_state()
+
+    def experiment_state_callback(self, message):
+        state = json.loads(message.data)
+        if self.experiment_state and state['reset_stamp_ns'] < self.experiment_state['reset_stamp_ns']:
+            return
+        self.experiment_state = state
 
     def timer_callback(self):
         ts = self.get_clock().now().to_msg()

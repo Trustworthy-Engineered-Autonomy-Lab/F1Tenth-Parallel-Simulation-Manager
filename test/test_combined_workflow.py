@@ -55,14 +55,19 @@ class CombinedWorkflowChecks(unittest.TestCase):
     def test_manager_advances_after_margin_and_keeps_configured_starts(self):
         node = self.node(EnvManager)
         node.reset_in_progress = False
+        node.phase = 'RUNNING'
         node.scenario_reset_pub = Mock()
         node.ego_frenet_ready = node.opp_frenet_ready = True
         node.ego_frenet_s, node.opp_frenet_s = 100, 99
+        node.progress.update('ego', 100)
+        node.progress.update('opp', 99)
         node._check_overtake_distance()
         node.opp_frenet_s = 102.9
+        node.progress.update('opp', 102.9)
         node._check_overtake_distance()
         self.assertEqual(node.current_sim, 1)
         node.opp_frenet_s = 103.1
+        node.progress.update('opp', 103.1)
         node._check_overtake_distance()
         self.assertEqual(node.current_sim, 2)
         request = node.scenario_reset_pub.publish.call_args[0][0]
@@ -81,8 +86,12 @@ class CombinedWorkflowChecks(unittest.TestCase):
         node._detect_lap_with_bubble()
         node.ego_pose = list(node.current_lap_center)
         node._detect_lap_with_bubble()
+        self.assertEqual(node.current_sim, 1)  # leaving and returning alone is not a full lap
+        node.progress.distance['ego'] = node.track_length
+        node._detect_lap_with_bubble()
         self.assertEqual(node.current_sim, 2)
         node._finish_reset_transition()
+        node.reset_in_progress = False  # warmup readiness is covered by test_experiment_protocol
         node.shutdown_pub = Mock()
         node._trigger_reset('TEST_COMPLETE')
         self.assertTrue(node.shutdown_requested)

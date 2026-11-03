@@ -1,12 +1,16 @@
 import math
 import os
+import json
+import shutil
 
 import rclpy
 import yaml
 from geometry_msgs.msg import Pose2D
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
-from std_msgs.msg import Bool, Int32
+from std_msgs.msg import Bool, Int32, String
+from lidar_processing.experiment_protocol import TrackProgress, scenario_speeds, protocol_qos
+from lidar_processing.manager_config import read_config
 from geometry_msgs.msg import Pose, PoseArray
 
 
@@ -50,6 +54,17 @@ class EnvManager(Node):
         self.reset_settle_seconds = float(
             self.config.get("reset_settle_seconds", 2.0)
         )
+        self.imm_initialization_seconds = float(self.config.get('imm_initialization_seconds', 1.5))
+        if self.imm_initialization_seconds < 1.5:
+            raise ValueError('IMM initialization must be at least 1.5 seconds')
+        self.phase = 'WAITING'
+        self.reset_stamp_ns = 0
+        self.progress = TrackProgress(self.track_length)
+        self.last_lap_progress = 0.0
+        self.state_pub = self.create_publisher(String, '/env_manager/experiment_state', protocol_qos())
+        self.create_subscription(String, '/env_manager/defensive_imm_ready', self._imm_ready, 10)
+        self.state_timer = self.create_timer(0.2, self._broadcast_state)
+        shutil.copyfile(self.config_file, os.path.join(self.results_dir, 'manager_settings.yaml'))
 
         # ---------------------------------------------------------
         # State
@@ -159,6 +174,7 @@ class EnvManager(Node):
             raise ValueError("MAX_LAPS must be at least 1")
 
         self._load_sim_config(self.current_sim)
+        self._set_phase('WAITING')
         self._publish_sim_num()
         self._publish_lap_num()
 
@@ -203,6 +219,7 @@ class EnvManager(Node):
 
     def _load_config(self):
         """Load manager.yaml."""
+        read_config(self.config_file)  # validate before publishing any scenario
         try:
             with open(self.config_file, "r", encoding="utf-8") as config_file:
                 config = yaml.safe_load(config_file)
@@ -246,6 +263,7 @@ class EnvManager(Node):
         self.current_opp_start = list(
             sim_config.get("opp", [0.0, 0.0, 0.0])
         )
+        self.ego_target_speed, self.opp_target_speed = scenario_speeds(sim_config)
 
         if len(self.current_ego_start) != 3:
             raise ValueError(
@@ -304,6 +322,10 @@ class EnvManager(Node):
     def _publish_scenario_reset(self):
         msg = PoseArray()
         msg.header.stamp = self.get_clock().now().to_msg()
+        self.reset_stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+        self.progress = TrackProgress(self.track_length)
+        self.last_lap_progress = 0.0
+        self._set_phase('SETTLING')
         msg.header.frame_id = 'map'
 
         msg.poses = [
@@ -351,6 +373,8 @@ class EnvManager(Node):
     def ego_frenet_cb(self, msg):
         self.ego_frenet_s = msg.x
         self.ego_frenet_ready = True
+        if self.phase in ('WARMUP', 'RUNNING'):
+            self.progress.update('ego', msg.x)
 
         if self.reset_in_progress or self.shutdown_requested:
             return
@@ -363,6 +387,8 @@ class EnvManager(Node):
     def opp_frenet_cb(self, msg):
         self.opp_frenet_s = msg.x
         self.opp_frenet_ready = True
+        if self.phase in ('WARMUP', 'RUNNING'):
+            self.progress.update('opp', msg.x)
 
         if self.reset_in_progress or self.shutdown_requested:
             return
@@ -392,7 +418,8 @@ class EnvManager(Node):
             self.lap_armed = True
             return
 
-        if inside_bubble and self.lap_armed:
+        if (inside_bubble and self.lap_armed
+                and self.progress.distance['ego'] - self.last_lap_progress >= self.track_length * 0.8):
             # Disarm before completing the lap so callbacks cannot count
             # the same crossing twice.
             self.lap_armed = False
@@ -400,10 +427,7 @@ class EnvManager(Node):
 
     def _detect_lap_with_frenet(self):
         """Fallback lap detection using Frenet wrap-around."""
-        if (
-            self.last_ego_s > self.track_length * 0.80
-            and self.ego_frenet_s < self.track_length * 0.20
-        ):
+        if self.progress.distance['ego'] - self.last_lap_progress >= self.track_length:
             self._complete_lap("FRENET_WRAP")
 
         self.last_ego_s = self.ego_frenet_s
@@ -414,6 +438,7 @@ class EnvManager(Node):
 
         self.total_lap_count += 1
         self.sim_lap_count += 1
+        self.last_lap_progress = self.progress.distance['ego']
         self._publish_lap_num()
 
         self.get_logger().info(
@@ -431,17 +456,6 @@ class EnvManager(Node):
     # -------------------------------------------------------------
     # Overtake detection
     # -------------------------------------------------------------
-    def _wrapped_frenet_delta(self):
-        """Return opponent_s - ego_s with track wrap-around handled."""
-        delta = self.opp_frenet_s - self.ego_frenet_s
-
-        if delta > self.track_length / 2.0:
-            delta -= self.track_length
-        elif delta < -self.track_length / 2.0:
-            delta += self.track_length
-
-        return delta
-
     def _check_overtake_distance(self):
         """
         Trigger a reset when the opponent transitions from behind the ego
@@ -455,7 +469,9 @@ class EnvManager(Node):
         ):
             return
 
-        delta = self._wrapped_frenet_delta()
+        delta = self.progress.gap
+        if delta is None:
+            return
 
         # The opponent must first be observed behind the ego.
         if delta <= 0.0:
@@ -482,6 +498,7 @@ class EnvManager(Node):
             return
 
         self.reset_in_progress = True
+        self._set_phase('FINISHED', reason)
 
         self.get_logger().info(
             f"🔄 Simulation {self.current_sim} finished: {reason}"
@@ -539,11 +556,65 @@ class EnvManager(Node):
         if self.shutdown_requested:
             return
 
-        self.reset_in_progress = False
+        self.warmup_started_ns = self.get_clock().now().nanoseconds
+        self._set_phase('WARMUP')
+        self.warmup_timer = self.create_timer(0.5, self._check_warmup_timeout)
 
-        self.get_logger().info(
-            f"Simulation {self.current_sim} is active."
-        )
+    def _state(self, reason=''):
+        return {'scenario': self.current_sim, 'phase': self.phase,
+                'reset_stamp_ns': self.reset_stamp_ns,
+                'event_stamp_ns': getattr(self, 'phase_stamp_ns', 0),
+                'reset_settle_seconds': self.reset_settle_seconds,
+                'track_length': self.track_length,
+                'overtake_margin': self.overtake_margin,
+                'ego_speed': self.ego_target_speed, 'opp_speed': self.opp_target_speed,
+                'ego_start': self.current_ego_start, 'opp_start': self.current_opp_start,
+                'imm_initialization_seconds': self.imm_initialization_seconds,
+                'reason': reason}
+
+    def _broadcast_state(self):
+        self.state_pub.publish(String(data=json.dumps(self._state(getattr(self, 'phase_reason', '')))))
+
+    def _set_phase(self, phase, reason=''):
+        self.phase, self.phase_reason = phase, reason
+        self.phase_stamp_ns = self.get_clock().now().nanoseconds
+        self._broadcast_state()
+        event = self._state(reason)
+        event['timestamp_ns'] = self.get_clock().now().nanoseconds
+        with open(os.path.join(self.results_dir, 'scenario_events.jsonl'), 'a') as stream:
+            stream.write(json.dumps(event) + '\n')
+        self.get_logger().info(f'Experiment {self.current_sim}: {phase} {reason}')
+
+    def _imm_ready(self, message):
+        ready = json.loads(message.data)
+        if (self.phase != 'WARMUP' or ready.get('reset_stamp_ns') != self.reset_stamp_ns
+                or not ready.get('ready')
+                or ready.get('observation_seconds', 0) < self.imm_initialization_seconds):
+            return
+        elapsed = (self.get_clock().now().nanoseconds - self.warmup_started_ns) / 1e9
+        if elapsed < self.imm_initialization_seconds:
+            return
+        gap = self.progress.gap
+        if gap is None:
+            return
+        if gap >= 0:
+            self._set_phase('ERROR', 'Opponent must remain behind the ego through initialization')
+            self._trigger_shutdown()
+            return
+        self.warmup_timer.cancel()
+        self.destroy_timer(self.warmup_timer)
+        self.reset_in_progress = False
+        self.overtake_armed = True
+        self._set_phase('RUNNING')
+        self.get_logger().info(f'Simulation {self.current_sim} is active. IMM initialized for {ready["observation_seconds"]:.2f}s.')
+
+    def _check_warmup_timeout(self):
+        if self.phase != 'WARMUP':
+            return
+        elapsed = (self.get_clock().now().nanoseconds - self.warmup_started_ns) / 1e9
+        if elapsed > max(15.0, self.imm_initialization_seconds + 10):
+            self._set_phase('ERROR', 'Defensive IMM did not receive a continuous initialization window')
+            self._trigger_shutdown()
 
     def _trigger_shutdown(self):
         """Notify the logger and then stop this manager node."""

@@ -33,6 +33,27 @@ def read_config(path):
         result[name] = value
     if result['num_sessions'] > 100:
         raise ValueError('num_sessions must not exceed 100')
+    warmup = raw.get('imm_initialization_seconds', 1.5)
+    if isinstance(warmup, bool) or not isinstance(warmup, (int, float)) or not math.isfinite(warmup) or warmup < 1.5:
+        raise ValueError('imm_initialization_seconds must be at least 1.5')
+    try:
+        from lidar_processing.experiment_protocol import scenario_speeds
+    except ModuleNotFoundError:
+        from experiment_protocol import scenario_speeds  # launcher's standalone script entry point
+    scenarios = raw.get('sim_start', {})
+    if not isinstance(scenarios, dict):
+        raise ValueError('sim_start must be a mapping')
+    if scenarios and any(f's_{i}' not in scenarios for i in range(1, result['num_simulations'] + 1)):
+        raise ValueError('Each requested simulation must have a sim_start entry')
+    for scenario in scenarios.values():
+        if not isinstance(scenario, dict):
+            raise ValueError('Each scenario must be a mapping')
+        for car in ('ego', 'opp'):
+            pose = scenario.get(car)
+            if (not isinstance(pose, list) or len(pose) != 3 or any(
+                    isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in pose)):
+                raise ValueError(f'{car} must contain finite [x, y, yaw_radians]')
+        scenario_speeds(scenario)
     return result
 
 

@@ -29,6 +29,8 @@ from geometry_msgs.msg import PoseStamped, Pose, Point
 from visualization_msgs.msg import MarkerArray, Marker
 from racetrack_utilities.racetrack_utilities import RacetrackUtilities
 from lidar_processing.scenario_lifecycle import ScenarioLifecycle
+import json
+import math
 
 from filterpy.kalman import KalmanFilter
 
@@ -426,6 +428,11 @@ class IMMFilterNode(Node):
         # ROS2 I/O
         self.sub = self.create_subscription(
             Float64MultiArray, '/frenet_opp_state_vector', self._cb, 10)
+        from std_msgs.msg import String
+        self.readiness_pub = self.create_publisher(String, '/env_manager/defensive_imm_ready', 10)
+        self.warm_first_ns = None
+        self.warm_last_ns = None
+        self.warm_samples = 0
         self.pub = self.create_publisher(Path, '/imm_path', 10)
 
         self.cov_pub = self.create_publisher(Marker, '/imm_cov', 10)
@@ -444,6 +451,8 @@ class IMMFilterNode(Node):
         self.get_logger().info('IMMFilterNode ready.')
 
     def reset_scenario(self, _message):
+        self.warm_first_ns = self.warm_last_ns = None
+        self.warm_samples = 0
         self.s_imm.reinitialize(np.zeros(3))
         self.d_imm.reinitialize(np.zeros(2))
         self._initialized = False
@@ -650,6 +659,22 @@ class IMMFilterNode(Node):
         z_s = np.array([[s]])
         z_d = np.array([[d]])
         now = self.get_clock().now()
+        stamp = now.nanoseconds
+        if (self.warm_first_ns is None or dt > 0.2
+                or (self.warm_last_ns is not None and stamp - self.warm_last_ns > 250_000_000)):
+            self.warm_first_ns = stamp
+            self.warm_samples = 0
+        self.warm_last_ns = stamp
+        self.warm_samples += 1
+        configuration = self.lifecycle.configuration
+        if configuration:
+            from std_msgs.msg import String
+            observed = (stamp - self.warm_first_ns) / 1e9
+            required = configuration['imm_initialization_seconds']
+            self.readiness_pub.publish(String(data=json.dumps({
+                'reset_stamp_ns': configuration['reset_stamp_ns'],
+                'observation_seconds': observed, 'samples': self.warm_samples,
+                'ready': observed >= required and self.warm_samples >= math.ceil(required / 0.05)})))
 
         # first observation: cold-start
         if not self._initialized:

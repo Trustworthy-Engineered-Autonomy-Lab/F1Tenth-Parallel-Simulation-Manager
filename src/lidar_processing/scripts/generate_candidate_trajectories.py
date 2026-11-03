@@ -92,7 +92,7 @@ class OpponentIntentPredictor(Node):
         plan_group = MutuallyExclusiveCallbackGroup()
         self.lifecycle = ScenarioLifecycle(
             self, self.reset_scenario, ('ego_odom_callback', 'starting_points_cb'),
-            callback_group=io_group)
+            callback_group=io_group, allowed_phases=('RUNNING',))
 
         self.create_subscription(Odometry, '/ego_racecar/odom',
                                  self.ego_odom_callback, latest_qos,

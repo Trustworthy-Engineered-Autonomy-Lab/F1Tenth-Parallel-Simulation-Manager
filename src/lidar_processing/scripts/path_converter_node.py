@@ -27,7 +27,7 @@ from lidar_processing.scenario_lifecycle import ScenarioLifecycle
 class PathConverter(Node):
     def __init__(self):
         super().__init__("divert_path_converter")
-        self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, ('cb',))
+        self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, ('cb',), allowed_phases=('RUNNING',))
         self.declare_parameters("", [
             ("in_topic", "/ego_best_defensive_spline"),
             ("out_topic", "/divert_waypoints"),

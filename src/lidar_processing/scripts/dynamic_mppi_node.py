@@ -131,6 +131,18 @@ class DynamicMPPI(Node):
         self.drive_pub.publish(AckermannDriveStamped())
         self.state_pub.publish(String(data=RACELINE))
 
+    def configure_experiment(self, state):
+        from rclpy.parameter import Parameter
+        target = state['ego_speed']
+        minimum = min(0.75, target * 0.7)
+        self.set_parameters([Parameter('max_throttle', value=target),
+                             Parameter('min_throttle', value=minimum)])
+        # Use KBM's constructor to update the shared bounds read by its class-method rollouts.
+        self.model = KBM(self.get_parameter('wheelbase').value, minimum, target,
+                         self.get_parameter('max_steer').value, self.get_parameter('dt').value)
+        self.raceline[:, 3] = target
+        self.u_prev[:, 0] = target
+
     def _init_params(self):
         self.declare_parameters("", [
             ("visualize", None), ("waypoint_path", None), ("vehicle_frame", None),
@@ -157,12 +169,16 @@ class DynamicMPPI(Node):
     # Divert intake  (runs once per message, NOT in the MPPI hot loop)
     # ------------------------------------------------------------------ #
     def divert_cb(self, msg: Float64MultiArray):
+        if self.lifecycle.phase != 'RUNNING':
+            return
         if self.state != RACELINE and not self.get_parameter("allow_interrupt").value:
             self.info.warn("divert received but still maneuvering; ignoring "
                            "(set allow_interrupt:=true to override)")
             return
 
         arr = unpack_waypoints(msg)
+        if self.lifecycle.configuration and arr.shape[1] >= 4:
+            arr[:, 3] = self.lifecycle.configuration['ego_speed']
         if arr.shape[0] < 2:
             self.info.warn("divert has <2 points; ignoring")
             return

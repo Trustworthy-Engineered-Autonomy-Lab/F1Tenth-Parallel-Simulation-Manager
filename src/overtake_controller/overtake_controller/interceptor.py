@@ -17,7 +17,7 @@ class OvertakeInterceptorNode(Node):
         super().__init__('overtake_interceptor')
         self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, (
             'ego_odom_callback', 'opp_odom_callback', 'imm_path_callback',
-            'scan_callback', 'continuous_spline_update'))
+            'scan_callback', 'continuous_spline_update'), allowed_phases=('RUNNING',))
         self.declare_parameter('racetrack_csv', '/sim_ws/src/lidar_processing/scripts/Spielberg_map.csv')
         self.track = RacetrackUtilities(self.get_parameter('racetrack_csv').value)
         
