@@ -3,7 +3,7 @@
 
 dynamic_mppi:
   ros__parameters:
-    visualize: False
+    visualize: True
     waypoint_path: "/sim_ws/src/lidar_processing/config/Spielberg_mppi_waypoints_sparse.csv"   # same centerline as the original
     vehicle_frame: "ego_racecar/base_link"
 

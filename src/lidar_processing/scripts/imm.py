@@ -4,6 +4,8 @@ IMM (Interacting Multiple Model) Filter Node for Frenet-frame trajectory predict
 
 Subscribes to /frenet_opp_state_vector  → (s, d, dt)
 Publishes    to /imm_path               → nav_msgs/Path in "map" frame
+             to /imm_opp_velocity       → geometry_msgs/TwistStamped, IMM velocity estimate
+                                          (linear.x = s', linear.y = d', linear.z = speed)
 
 Forward-propagates 10 timesteps × 0.25 s = 2.5 s ahead.
 
@@ -25,7 +27,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray, Bool
 from nav_msgs.msg import Path, Odometry
-from geometry_msgs.msg import PoseStamped, Pose, Point
+from geometry_msgs.msg import PoseStamped, Pose, Point, TwistStamped
 from visualization_msgs.msg import MarkerArray, Marker
 from racetrack_utilities.racetrack_utilities import RacetrackUtilities
 from lidar_processing.scenario_lifecycle import ScenarioLifecycle
@@ -434,6 +436,8 @@ class IMMFilterNode(Node):
         self.warm_last_ns = None
         self.warm_samples = 0
         self.pub = self.create_publisher(Path, '/imm_path', 10)
+        # IMM-estimated opponent velocity, consumed by the Stackelberg game.
+        self.vel_pub = self.create_publisher(TwistStamped, '/imm_opp_velocity', 10)
 
         self.cov_pub = self.create_publisher(Marker, '/imm_cov', 10)
         
@@ -708,6 +712,7 @@ class IMMFilterNode(Node):
         self._clear_coast_state()
 
         self._last_path = self._publish_prediction(x_s, x_d, verbose=True)
+        self._publish_velocity(x_s, x_d)
         self.publish_covariance()
 
     # ──────────────────────────────────────────────────────────────────────
@@ -736,6 +741,7 @@ class IMMFilterNode(Node):
             self._last_s = x_s[0]
             self._last_d = x_d[0]
             self._last_path = self._publish_prediction(x_s, x_d, verbose=False)
+            self._publish_velocity(x_s, x_d)
             self.publish_covariance()
             self.get_logger().info(
                 'coasting (silence={:.2f}s) s={:.2f} d={:.2f}'.format(
@@ -789,6 +795,19 @@ class IMMFilterNode(Node):
 
         self.pub.publish(path_msg)
         return path_msg
+
+    def _publish_velocity(self, x_s, x_d):
+        # type: (np.ndarray, np.ndarray) -> None
+        """Publish the IMM-combined opponent velocity: s' (along the centerline),
+        d' (lateral) and their magnitude, the speed along the opponent's path."""
+        s_dot, d_dot = float(x_s[1]), float(x_d[1])
+        msg = TwistStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'frenet'
+        msg.twist.linear.x = s_dot
+        msg.twist.linear.y = d_dot
+        msg.twist.linear.z = math.hypot(s_dot, d_dot)
+        self.vel_pub.publish(msg)
 
     def _forward_propagate(self, x_s, x_d):
         # type: (np.ndarray, np.ndarray) -> List[Tuple[float, float]]

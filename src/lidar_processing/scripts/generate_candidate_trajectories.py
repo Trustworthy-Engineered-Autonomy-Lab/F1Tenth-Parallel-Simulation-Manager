@@ -11,7 +11,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.qos import QoSProfile, HistoryPolicy, ReliabilityPolicy
 from nav_msgs.msg import Odometry
 from visualization_msgs.msg import Marker, MarkerArray
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, TwistStamped
 from std_msgs.msg import Int32
 from scipy.interpolate import make_smoothing_spline
 from racetrack_utilities.racetrack_utilities import RacetrackUtilities
@@ -36,11 +36,19 @@ class OpponentIntentPredictor(Node):
         self.max_start_age = 0.5          # drop starting points older than this [s]
         self.opponent_velocity = 2.5
         self.ego_velocity = 1.5
+        # The Stackelberg game uses the IMM's opponent speed and the ego's measured
+        # speed; the constants above are the fallback when either is unusable.
+        self.min_game_velocity = 0.3      # m/s, below this a speed is treated as unusable
+        self.max_game_velocity = 10.0     # m/s, rejects a diverged IMM estimate
+        self.max_imm_velocity_age = 0.5   # s, drop IMM velocity estimates older than this
         self.d_goals = np.linspace(-0.8, 0.8, 5)
         self.d_clear = 0.5
         # +-0.65 still leaves < a car width (0.31 m) to the wall, so the outer lanes fully block,
         # and < 1% of them put the car's footprint into the wall; from +-0.75 up, short lanes mostly do
         self.ego_d_candidates = np.linspace(-0.65, 0.65, 5)
+        # Lane-change length [m] per candidate above. The blocking lanes leave the
+        # centerline fast; only the return-to-center lane (d = 0) keeps the gentle default.
+        self.ego_lane_change_lengths = [1.5, 1.2, 2.2, 1.2, 1.5]
         self.d_limit = 0.8
         self.smoothing_lam = 0.5      # make_smoothing_spline lam (t normalised to [0, 1])
         self.n_fit_points = 40       # RRT polyline is resampled to this many points (must be >= 5)
@@ -72,6 +80,8 @@ class OpponentIntentPredictor(Node):
 
         self.ego_state = (0.0, 0.0, 0.0)
         self.ego_speed = 0.0              # measured, from odom
+        self.imm_opp_speed = None         # IMM estimate, from /imm_opp_velocity
+        self.imm_opp_speed_time = None
         self.ego_data_received = False
         self.latest_points = None
         self.latest_stamp = None
@@ -91,7 +101,7 @@ class OpponentIntentPredictor(Node):
         io_group = MutuallyExclusiveCallbackGroup()
         plan_group = MutuallyExclusiveCallbackGroup()
         self.lifecycle = ScenarioLifecycle(
-            self, self.reset_scenario, ('ego_odom_callback', 'starting_points_cb'),
+            self, self.reset_scenario, ('ego_odom_callback', 'starting_points_cb', 'imm_velocity_cb'),
             callback_group=io_group, allowed_phases=('RUNNING',))
 
         self.create_subscription(Odometry, '/ego_racecar/odom',
@@ -99,6 +109,9 @@ class OpponentIntentPredictor(Node):
                                  callback_group=io_group)
         self.create_subscription(Marker, '/starting_points',
                                  self.starting_points_cb, latest_qos,
+                                 callback_group=io_group)
+        self.create_subscription(TwistStamped, '/imm_opp_velocity',
+                                 self.imm_velocity_cb, latest_qos,
                                  callback_group=io_group)
         self.create_timer(self.plan_period, self.plan_timer_cb,
                           callback_group=plan_group)
@@ -127,6 +140,7 @@ class OpponentIntentPredictor(Node):
     def reset_scenario(self, _message):
         self.ego_data_received = False
         self.ego_speed = 0.0
+        self.imm_opp_speed = self.imm_opp_speed_time = None
         self.latest_points = self.latest_stamp = None
         self.points_seq = self.planned_seq = 0
         self.plan_duration_est = self.planner.time_budget * NUM_START_POINTS
@@ -145,6 +159,23 @@ class OpponentIntentPredictor(Node):
         self.ego_state = (p.x, p.y, self.quat_to_yaw(msg.pose.pose.orientation))
         self.ego_speed = msg.twist.twist.linear.x
         self.ego_data_received = True
+
+    def imm_velocity_cb(self, msg: TwistStamped):
+        self.imm_opp_speed = msg.twist.linear.z
+        self.imm_opp_speed_time = self.get_clock().now()
+
+    def game_velocities(self, ego_speed, now):
+        """(ego, opponent) speeds for the Stackelberg game: the measured ego speed
+        and the IMM opponent speed, each replaced by its constant when unusable."""
+        def usable(v):
+            return v is not None and self.min_game_velocity <= v <= self.max_game_velocity
+
+        opp = self.imm_opp_speed
+        if (self.imm_opp_speed_time is None
+                or (now - self.imm_opp_speed_time).nanoseconds * 1e-9 > self.max_imm_velocity_age):
+            opp = None
+        return (ego_speed if usable(ego_speed) else self.ego_velocity,
+                opp if usable(opp) else self.opponent_velocity)
 
     def starting_points_cb(self, msg: Marker):
         self.latest_points = [(p.x, p.y) for p in msg.points]
@@ -176,6 +207,7 @@ class OpponentIntentPredictor(Node):
             cycle_t0 = time.perf_counter()
             ex, ey, _ = self.ego_state
             ego_speed = self.ego_speed
+            game_ego_v, game_opp_v = self.game_velocities(ego_speed, self.get_clock().now())
 
         s_ego, d_ego = self.rutil.convert_to_frenet(ex, ey)
 
@@ -208,7 +240,7 @@ class OpponentIntentPredictor(Node):
         best_ego_idx = None
         if opponent_paths and ego_time_paths:
             best_ego_idx = pick_trajectory(ego_time_paths, opponent_paths,
-                                           self.ego_velocity, self.opponent_velocity, self.rutil)
+                                           game_ego_v, game_opp_v, self.rutil)
 
         # Reset callbacks run alongside RRT*. Discard work started on an old
         # scenario and serialize publishing with reset's marker clearing.
@@ -225,7 +257,8 @@ class OpponentIntentPredictor(Node):
             self.get_logger().info(
                 f"planning cycle {1e3 * cycle_time:.0f} ms, projected ego {ego_speed * lead:.2f} m ahead "
                 f"({ego_speed:.2f} m/s x {1e3 * lead:.0f} ms), {num_overtaking_splines} RRT* paths -> "
-                f"{len(opponent_paths)} diverse opponent trajectories", throttle_duration_sec=1.0)
+                f"{len(opponent_paths)} diverse opponent trajectories, game speeds "
+                f"ego {game_ego_v:.2f} / opp {game_opp_v:.2f} m/s", throttle_duration_sec=1.0)
 
             # Publish the defensive splines ONLY when overtaking splines were
             # produced this cycle (same trigger as the threat markers) and a
@@ -332,9 +365,10 @@ class OpponentIntentPredictor(Node):
                 polylines.append(bspline_smooth(xy, self.roadmap_smooth_points, self.roadmap_smooth_s))
         return polylines
 
-    def _ego_lane_path(self, s_ego, d_ego, d_traj, max_ot_time):
+    def _ego_lane_path(self, s_ego, d_ego, d_traj, max_ot_time, lane_change_length=None):
         """One constant-speed ego lane as a (path_resolution, 3) [t, s, d] array,
-        starting at (s_ego, d_ego) and shifting toward d_traj.
+        starting at (s_ego, d_ego) and shifting toward d_traj over lane_change_length
+        metres (default self.lane_change_length).
 
         Complete the lane change over a bounded longitudinal distance so a
         receding-horizon controller sees the blocking offset early. Caller
@@ -342,7 +376,9 @@ class OpponentIntentPredictor(Node):
         horizon = min(max_ot_time * self.ego_velocity, self.max_s_clearance)
         T = horizon / self.ego_velocity
         t = np.linspace(0.0, T, self.path_resolution)
-        u = np.clip(self.ego_velocity * t / self.lane_change_length, 0.0, 1.0)
+        if lane_change_length is None:
+            lane_change_length = self.lane_change_length
+        u = np.clip(self.ego_velocity * t / lane_change_length, 0.0, 1.0)
         blend = u * u * (3.0 - 2.0 * u)
         s = s_ego + self.ego_velocity * t
         return np.column_stack((t, s, d_ego + (d_traj - d_ego) * blend))
@@ -355,8 +391,10 @@ class OpponentIntentPredictor(Node):
         cleanly produce 'no defence'."""
         if max_ot_time <= 1e-3:
             return []
-        return [self._ego_lane_path(s_ego, d_ego, d_traj, max_ot_time)
-                for d_traj in [d_ego, *self.ego_d_candidates]]
+        lanes = [self._ego_lane_path(s_ego, d_ego, d_ego, max_ot_time)]
+        lanes += [self._ego_lane_path(s_ego, d_ego, d_traj, max_ot_time, length)
+                  for d_traj, length in zip(self.ego_d_candidates, self.ego_lane_change_lengths)]
+        return lanes
 
 
     def path_to_time_trajectory(self, P, velocity):

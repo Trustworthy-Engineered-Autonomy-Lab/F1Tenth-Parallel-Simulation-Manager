@@ -252,7 +252,7 @@ def pick_trajectory(ego_paths, opponent_paths, ego_velocity : float, opponent_ve
     Needs at least one opponent trajectory."""
 
     # ego cost function weights
-    w_block = 0.05 # a full block (rho = 1) is worth 5% progress; candidates' R differ by ~0.1-3%. Subject to change
+    w_block = 0.5 # a full block (rho = 1) is worth 5% progress; candidates' R differ by ~0.1-3%. Subject to change
     w_reck = 1.0 # pi(0.95) ~ 0.05, so a block at tau = 0.95 already costs what it's worth. Subject to change
 
     # opponent cost function weights

@@ -12,7 +12,10 @@ from lidar_processing.scenario_lifecycle import ScenarioLifecycle
 class SimOpponentFrenet(Node):
     def __init__(self):
         super().__init__("sim_opponent_frenet")
-        self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, ('odom_callback',))
+        # Opponent odometry only initializes the defensive IMM during WARMUP; once the
+        # scenario is RUNNING the IMM must rely on its own prediction, not ground truth.
+        self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, ('odom_callback',),
+                                           allowed_phases=('WARMUP',))
 
         self.track = RacetrackUtilities(
             "/sim_ws/src/lidar_processing/scripts/Spielberg_map.csv"
