@@ -57,6 +57,12 @@ class OpponentIntentPredictor(Node):
         self.n_fit_points = 40       # RRT polyline is resampled to this many points (must be >= 5)
         self.max_s_clearance = 5.0
         self.lane_change_length = 2.2    # reach the blocking lane within the controller's lookahead
+        # Still plan against an opponent that is close or alongside (up to this far ahead of
+        # the ego): with a rear blind spot, that is usually when LiDAR first sees it.
+        self.max_opp_lead = 0.25         # m
+        # Floor on the estimated time to be overtaken, so a close opponent still gets ego
+        # lanes long enough to finish the longest lane change (2.2 m at 1.5 m/s ~ 1.47 s).
+        self.min_overtake_time = 1.5     # s
 
         # roadmap search over the RRT* opponent paths (same values as diverse_opponent_trajectories_node)
         self.roadmap_k = 3                # diverse opponent trajectories fed to the Stackelberg game
@@ -294,7 +300,8 @@ class OpponentIntentPredictor(Node):
     def get_rrt_conditions(self, starts, s_ego, d_ego, goals):
         ego_pose_frenet = np.array([s_ego, d_ego])
         distances = ego_pose_frenet[0] - starts[:, 0]
-        opp_ot_times = distances/(self.opponent_velocity - self.ego_velocity)
+        opp_ot_times = np.maximum(distances / (self.opponent_velocity - self.ego_velocity),
+                                  self.min_overtake_time)
         s_clearances = np.minimum((self.ego_velocity) * opp_ot_times, self.max_s_clearance)
         goal_sets = []
         for s_clear in s_clearances:
@@ -327,8 +334,8 @@ class OpponentIntentPredictor(Node):
             point_paths = []
             point_time_paths = []
 
-            # opponent already ahead of the goal -> nothing meaningful to plan
-            if s_opp < s_ego - 0.5:
+            # opponent already past the ego -> nothing meaningful to plan
+            if s_opp < s_ego + self.max_opp_lead:
                 # One dedicated RRT* tree per goal: every reachable goal in this
                 # start's goal set gets its own collision-free trajectory if one
                 # exists. step omitted -> the planner picks a dynamic step per

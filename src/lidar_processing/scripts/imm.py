@@ -50,6 +50,11 @@ REINIT_THRESHOLD = 2.0     # seconds; reinitialize KF if dt gap is too large
 COAST_START_S  = 0.5   # begin coasting after this much silence
 COAST_GIVEUP_S = 20.0                # stop advancing after this much silence, then hold
 
+# Starting points are still sampled for an opponent alongside the ego, up to this far ahead
+# (matches the defensive planner's max_opp_lead), in a window at least this long.
+OPP_MAX_LEAD      = 0.25   # m
+MIN_SAMPLE_WINDOW = 0.1    # m
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Wrapped Kalman Filter (cyclic / modular innovation for s)
@@ -522,6 +527,10 @@ class IMMFilterNode(Node):
             return
         ego_s = self.racetrack_utilities.unwrap_s(self.last_ego_s, s_lower)
         s_upper = ego_s - 0.1 * (ego_s - s_lower)
+        # An opponent close behind or alongside (not yet OPP_MAX_LEAD past the ego) still
+        # gets samples, so the defensive planner can react when it comes into view.
+        if s_lower <= ego_s + OPP_MAX_LEAD:
+            s_upper = max(s_upper, s_lower + MIN_SAMPLE_WINDOW)
         s_mean = self.racetrack_utilities.unwrap_s(s_mean, s_lower)
 
         filtered_points_frenet = []
