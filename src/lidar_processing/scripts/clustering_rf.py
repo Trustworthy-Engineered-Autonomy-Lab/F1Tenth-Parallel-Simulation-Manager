@@ -32,7 +32,7 @@ class ClusteringNode(Node):
         self.switching_threshold = 0.2
         
         # classification model (RF) and standard scaler based on training data
-        self.model, self.scaler = self.train_model('/sim_ws/pc_data_revised.csv')
+        self.model, self.scaler = self.train_model('/sim_ws/src/f1tenth_gym_ros/src/lidar_processing/config/pc_data_revised.csv')
         
     def cluster_callback(self, msg):
         """Uses the DBSCAN algorithm to cluster point-cloud data and a random forest model to identify which cluster belongs to the opponent vehicle"""

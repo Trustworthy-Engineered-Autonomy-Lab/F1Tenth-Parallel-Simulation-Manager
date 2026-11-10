@@ -4,11 +4,15 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray
 from racetrack_utilities.racetrack_utilities import RacetrackUtilities
+from lidar_processing.scenario_lifecycle import ScenarioLifecycle
 
 
 class FrenetOpponentStateNode(Node):
     def __init__(self):
         super().__init__('FrenetOpponentStateNode')
+        # LiDAR observations feed the IMM only once RUNNING; WARMUP initializes it from odometry.
+        self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, ('state_cb',),
+                                           allowed_phases=('RUNNING',))
 
         name = "/sim_ws/src/lidar_processing/scripts/Spielberg_map.csv"
         self.racetrack = RacetrackUtilities(name)
@@ -24,6 +28,9 @@ class FrenetOpponentStateNode(Node):
         self.frenet_pub = self.create_publisher(
             Float64MultiArray, "/frenet_opp_state_vector", 10
         )
+
+    def reset_scenario(self, _message):
+        self.last_publish_time = None
 
     def state_cb(self, msg: Float64MultiArray):
         # unpack — ignore vx, vy

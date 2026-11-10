@@ -20,7 +20,13 @@ def generate_launch_description():
         pipeline_node(package='overtake_controller', executable='imm_filter'),
         pipeline_node(package='overtake_controller', executable='interceptor'),
         pipeline_node(package='overtake_controller', executable=LaunchConfiguration('controller')),
+        # Opponent odometry initializes the defensive IMM during WARMUP only.
         pipeline_node(package='lidar_processing', executable='sim_opp_frenet.py'),
+        # LiDAR opponent detection: feeds the IMM during RUNNING when the opponent is in the FOV.
+        pipeline_node(package='lidar_processing', executable='scan_to_cloud'),
+        pipeline_node(package='lidar_processing', executable='clustering_rf.py'),
+        pipeline_node(package='lidar_processing', executable='bounding_box'),
+        pipeline_node(package='lidar_processing', executable='frenet_opp_state.py'),
         pipeline_node(package='lidar_processing', executable='imm.py',
              remappings=[('/imm_path', '/defensive_imm_path')]),
         pipeline_node(package='lidar_processing', executable='generate_candidate_trajectories.py'),
