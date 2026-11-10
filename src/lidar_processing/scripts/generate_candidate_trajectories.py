@@ -41,6 +41,9 @@ class OpponentIntentPredictor(Node):
         self.min_game_velocity = 0.3      # m/s, below this a speed is treated as unusable
         self.max_game_velocity = 10.0     # m/s, rejects a diverged IMM estimate
         self.max_imm_velocity_age = 0.5   # s, drop IMM velocity estimates older than this
+        # With no usable IMM speed yet this scenario, assume an opponent this much faster
+        # than the ego (an overtaker has to be faster to pass).
+        self.opp_speed_margin = 0.4       # m/s
         self.d_goals = np.linspace(-0.8, 0.8, 5)
         self.d_clear = 0.5
         # +-0.65 still leaves < a car width (0.31 m) to the wall, so the outer lanes fully block,
@@ -82,6 +85,7 @@ class OpponentIntentPredictor(Node):
         self.ego_speed = 0.0              # measured, from odom
         self.imm_opp_speed = None         # IMM estimate, from /imm_opp_velocity
         self.imm_opp_speed_time = None
+        self.last_good_opp_speed = None   # last usable IMM estimate this scenario
         self.ego_data_received = False
         self.latest_points = None
         self.latest_stamp = None
@@ -141,6 +145,7 @@ class OpponentIntentPredictor(Node):
         self.ego_data_received = False
         self.ego_speed = 0.0
         self.imm_opp_speed = self.imm_opp_speed_time = None
+        self.last_good_opp_speed = None
         self.latest_points = self.latest_stamp = None
         self.points_seq = self.planned_seq = 0
         self.plan_duration_est = self.planner.time_budget * NUM_START_POINTS
@@ -166,16 +171,24 @@ class OpponentIntentPredictor(Node):
 
     def game_velocities(self, ego_speed, now):
         """(ego, opponent) speeds for the Stackelberg game: the measured ego speed
-        and the IMM opponent speed, each replaced by its constant when unusable."""
+        (its constant when unusable) and the IMM opponent speed. An unusable or
+        stale IMM speed falls back to the last usable IMM estimate this scenario,
+        or, before there is one, to the ego speed plus opp_speed_margin."""
         def usable(v):
             return v is not None and self.min_game_velocity <= v <= self.max_game_velocity
 
+        ego = ego_speed if usable(ego_speed) else self.ego_velocity
         opp = self.imm_opp_speed
         if (self.imm_opp_speed_time is None
                 or (now - self.imm_opp_speed_time).nanoseconds * 1e-9 > self.max_imm_velocity_age):
             opp = None
-        return (ego_speed if usable(ego_speed) else self.ego_velocity,
-                opp if usable(opp) else self.opponent_velocity)
+        if usable(opp):
+            self.last_good_opp_speed = opp
+        elif self.last_good_opp_speed is not None:
+            opp = self.last_good_opp_speed
+        else:
+            opp = ego + self.opp_speed_margin
+        return ego, opp
 
     def starting_points_cb(self, msg: Marker):
         self.latest_points = [(p.x, p.y) for p in msg.points]

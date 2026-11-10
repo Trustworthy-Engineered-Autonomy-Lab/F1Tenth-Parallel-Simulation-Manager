@@ -495,10 +495,11 @@ class IMMFilterNode(Node):
 
         self.ego_ahead_pub.publish(Bool(data=self.ego_ahead))
         
-    def _reinit_from_obs(self, s, d):
-        # type: (float, float) -> None
-        """Cold-restart both IMM axes from a fresh (s, d) observation."""
-        self.s_imm.reinitialize(np.array([s, 0.0, 0.0]))
+    def _reinit_from_obs(self, s, d, s_vel=0.0):
+        # type: (float, float, float) -> None
+        """Restart both IMM axes at a fresh (s, d) observation. s_vel carries the
+        longitudinal velocity over (0 for a cold start)."""
+        self.s_imm.reinitialize(np.array([s, s_vel, 0.0]))
         self.d_imm.reinitialize(np.array([d, 0.0]))
         self._last_s = s
         self._last_d = d
@@ -689,15 +690,18 @@ class IMMFilterNode(Node):
             return
 
         # Reinitialise if the reported gap is large, OR if we have been coasting /
-        # holding — in either case the live filter state is stale relative to this
-        # fresh observation, so we discard it and cold-restart.
+        # holding — in either case the live filter position is stale relative to this
+        # fresh observation, so we restart at it. The longitudinal velocity is kept:
+        # zeroing it made sparse LiDAR re-acquisitions read the opponent as nearly
+        # stopped. Lateral velocity and acceleration restart at zero.
         if dt > REINIT_THRESHOLD or self._coasting or self._gave_up:
             if self._coasting or self._gave_up:
                 reason = 'coast recovery'
             else:
                 reason = 'large dt={:.2f}s'.format(dt)
-            self.get_logger().warn('Reinitialising IMM filters ({}).'.format(reason))
-            self._reinit_from_obs(s, d)
+            s_vel = max(0.0, float(sum(m * x[1] for m, x in zip(self.s_imm.mu, self.s_imm.xs))))
+            self.get_logger().warn('Reinitialising IMM filters ({}), keeping s_dot={:.2f} m/s.'.format(reason, s_vel))
+            self._reinit_from_obs(s, d, s_vel)
             self._clear_coast_state()
             self._last_obs_time = now
             return
