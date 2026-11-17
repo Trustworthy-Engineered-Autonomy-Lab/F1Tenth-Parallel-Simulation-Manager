@@ -52,6 +52,7 @@ class DataLogger(Node):
         self.reset_hold_seconds = float(os.getenv('SCENARIO_RESET_HOLD_SECONDS', '2.0'))
         self.experiment = None
         self.running_stamp_ns = None   # when the current scenario entered RUNNING
+        self.summary_final = False     # current CSV's summary has its outcome filled in
         self.max_laps = int(os.getenv("MAX_LAPS", "2"))   # same default as the manager
         self.pending_reset_ns = 0
         self.row_offsets = []
@@ -63,7 +64,11 @@ class DataLogger(Node):
         self.collisions = {'ego': False, 'opp': False}
         self.collision_seen = {'ego': False, 'opp': False}
         self.progress = TrackProgress(self.max_track_length)
-        self.create_subscription(String, '/env_manager/experiment_state', self.experiment_cb, protocol_qos())
+        # FINISHED and the next scenario's SETTLING are published milliseconds apart; a depth-1
+        # queue could drop FINISHED, so keep a deeper queue (same durability/reliability).
+        state_qos = protocol_qos()
+        state_qos.depth = 10
+        self.create_subscription(String, '/env_manager/experiment_state', self.experiment_cb, state_qos)
         self.create_subscription(PoseArray, '/env_manager/reset_scenario', self.physical_reset_cb, 10)
         self.create_subscription(Path, '/defensive_imm_path', self.defensive_imm_cb, 10)
         self.create_subscription(String, '/env_manager/defensive_imm_ready', self.imm_ready_cb, 10)
@@ -195,6 +200,9 @@ class DataLogger(Node):
             return
         new_scenario = not self.experiment or state['reset_stamp_ns'] != self.experiment['reset_stamp_ns']
         if new_scenario and state['phase'] in ('SETTLING', 'WARMUP', 'RUNNING'):
+            if self.experiment and not self.summary_final:
+                self._finalize_from_event_log(self.experiment)
+            self.summary_final = False
             self._trim_at(state['reset_stamp_ns'])
             if self.current_sim != state['scenario']:
                 self._init_csv_for_sim(state['scenario'])
@@ -211,6 +219,26 @@ class DataLogger(Node):
             self._trim_at(state['event_stamp_ns'])
         if state['phase'] in ('FINISHED', 'ERROR'):
             self._write_summary(state)
+            self.summary_final = True
+
+    def _finalize_from_event_log(self, previous):
+        """Backstop for a missed FINISHED/ERROR message: take the previous scenario's
+        outcome from the manager's scenario_events.jsonl (same results directory)."""
+        event = None
+        try:
+            with open(os.path.join(self.results_dir, 'scenario_events.jsonl')) as stream:
+                for line in stream:
+                    entry = json.loads(line)
+                    if (entry.get('reset_stamp_ns') == previous['reset_stamp_ns']
+                            and entry.get('phase') in ('FINISHED', 'ERROR')):
+                        event = entry
+        except (OSError, ValueError):
+            pass
+        if event is None:
+            event = dict(previous, phase='UNKNOWN', reason='finish event not received')
+        elif event['phase'] == 'FINISHED':
+            self._trim_at(event['event_stamp_ns'])
+        self._write_summary(event)
 
     # ------------------------------------------------------------------
     # Scenario summary block at the top of each CSV
@@ -230,6 +258,8 @@ class DataLogger(Node):
             outcome, time_cell, lap_fraction = reason, 'whole lap completed', float(self.max_laps)
         elif phase in ('FINISHED', 'ERROR'):
             outcome, time_cell = f'{phase} {reason}'.strip(), 'not overtaken'
+        elif phase == 'UNKNOWN':
+            outcome, time_cell = f'UNKNOWN ({reason})', 'unknown'
         else:
             outcome, time_cell = 'IN_PROGRESS', 'in progress'
         return [
