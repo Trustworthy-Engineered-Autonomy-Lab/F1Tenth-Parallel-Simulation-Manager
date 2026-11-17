@@ -1,6 +1,16 @@
 # Dynamic MPPI params. Mirrors the original MPPI params and adds the divert/return
 # settings. Node names must match the rclpy node names in each script.
 
+# Shared by every node that loads this file.
+/**:
+  ros__parameters:
+    # Opponent observability for the defensive IMM.
+    #   false: opponent odometry only during WARMUP (~1.5 s) to initialize the IMM,
+    #          then LiDAR detections only (partial observability).
+    #   true:  opponent odometry for the whole run, LiDAR detections muted
+    #          (full-observability baseline).
+    full_observability: true
+
 dynamic_mppi:
   ros__parameters:
     visualize: True

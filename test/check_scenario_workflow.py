@@ -10,6 +10,7 @@ the cars still drive normally, but the completion events are synthetic.
 
 import argparse
 import csv
+import itertools
 import json
 import math
 import os
@@ -260,7 +261,8 @@ def main():
         for index in range(1, config['num_simulations'] + 1):
             file = output / f'simulation_{index}.csv'
             with file.open() as stream:
-                reader = csv.DictReader(stream)
+                # skip the scenario summary block the data logger writes above the column header
+                reader = csv.DictReader(itertools.dropwhile(lambda line: not line.startswith('timestamp,'), stream))
                 assert {'imm_trajectory', 'imm_active', 'mppi_state', 'driving_mode'} <= set(reader.fieldnames), file
                 rows = list(reader)
                 assert rows and all(None not in row for row in rows), f'Empty or malformed CSV: {file}'

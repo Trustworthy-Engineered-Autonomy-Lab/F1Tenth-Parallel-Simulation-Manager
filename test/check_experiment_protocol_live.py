@@ -1,6 +1,7 @@
 """Exercise real warmup, driving and scenario completion without synthetic events."""
 import argparse
 import csv
+import itertools
 import json
 import math
 import os
@@ -101,7 +102,8 @@ def main():
             warmup_seconds = (running['event_stamp_ns'] - warmup['event_stamp_ns']) / 1e9
             assert warmup_seconds >= 1.5, warmup_seconds
             with (output / f'simulation_{number}.csv').open() as stream:
-                rows = list(csv.DictReader(stream))
+                # skip the scenario summary block the data logger writes above the column header
+                rows = list(csv.DictReader(itertools.dropwhile(lambda line: not line.startswith('timestamp,'), stream)))
             assert rows and all(None not in row and all(v is not None for v in row.values()) for row in rows)
             assert {'WARMUP', 'RUNNING'} <= {r['experiment_phase'] for r in rows}
             assert all(r['mppi_state'] == 'RACELINE' for r in rows if r['experiment_phase'] == 'WARMUP')

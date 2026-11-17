@@ -11,8 +11,13 @@ class FrenetOpponentStateNode(Node):
     def __init__(self):
         super().__init__('FrenetOpponentStateNode')
         # LiDAR observations feed the IMM only once RUNNING; WARMUP initializes it from odometry.
+        # With full_observability (params_dynamic.yaml) the IMM gets odometry the whole run
+        # instead, so LiDAR detections are muted rather than interleaved with it.
+        full = self.declare_parameter('full_observability', False).value
         self.lifecycle = ScenarioLifecycle(self, self.reset_scenario, ('state_cb',),
-                                           allowed_phases=('RUNNING',))
+                                           allowed_phases=() if full else ('RUNNING',))
+        self.get_logger().info(f"full_observability={full}: LiDAR detections "
+                               f"{'muted' if full else 'feed the IMM during RUNNING'}")
 
         name = "/sim_ws/src/lidar_processing/scripts/Spielberg_map.csv"
         self.racetrack = RacetrackUtilities(name)

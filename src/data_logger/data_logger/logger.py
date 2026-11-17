@@ -4,6 +4,7 @@ from nav_msgs.msg import Odometry, Path
 from std_msgs.msg import Int32, Bool, String
 from geometry_msgs.msg import Pose2D
 import csv
+import io
 import os
 import sys
 import json
@@ -50,6 +51,8 @@ class DataLogger(Node):
         self.ego_frenet_ready = self.opp_frenet_ready = False
         self.reset_hold_seconds = float(os.getenv('SCENARIO_RESET_HOLD_SECONDS', '2.0'))
         self.experiment = None
+        self.running_stamp_ns = None   # when the current scenario entered RUNNING
+        self.max_laps = int(os.getenv("MAX_LAPS", "2"))   # same default as the manager
         self.pending_reset_ns = 0
         self.row_offsets = []
         self.defensive_imm_trajectory = []
@@ -199,9 +202,75 @@ class DataLogger(Node):
             self.last_opp_ahead = False
             self._reset_telemetry()
             self.hold_until_ns = state['reset_stamp_ns'] + int(state['reset_settle_seconds'] * 1e9)
+            self.running_stamp_ns = None
+            self._write_summary(state)
+        if state['phase'] == 'RUNNING' and self.running_stamp_ns is None:
+            self.running_stamp_ns = state.get('event_stamp_ns')
         self.experiment = state
         if state['phase'] == 'FINISHED':
             self._trim_at(state['event_stamp_ns'])
+        if state['phase'] in ('FINISHED', 'ERROR'):
+            self._write_summary(state)
+
+    # ------------------------------------------------------------------
+    # Scenario summary block at the top of each CSV
+    # ------------------------------------------------------------------
+    def _summary_rows(self, state):
+        """Fixed-length summary: scenario setup, then its outcome (filled in at the end)."""
+        ego_v, opp_v = state.get('ego_speed'), state.get('opp_speed')
+        ratio = round(float(opp_v) / float(ego_v), 4) if ego_v and opp_v else ''
+        length = float(state.get('track_length') or self.max_track_length)
+        phase, reason = state['phase'], state.get('reason', '')
+        lap_fraction = round(self.progress.distance['ego'] / length, 4)
+        if phase == 'FINISHED' and reason == 'SUCCESSFUL_OVERTAKE':
+            outcome = reason
+            end = state.get('event_stamp_ns', 0)
+            time_cell = round((end - (self.running_stamp_ns or end)) / 1e9, 3)
+        elif phase == 'FINISHED' and reason == 'MAX_LAPS_REACHED':
+            outcome, time_cell, lap_fraction = reason, 'whole lap completed', float(self.max_laps)
+        elif phase in ('FINISHED', 'ERROR'):
+            outcome, time_cell = f'{phase} {reason}'.strip(), 'not overtaken'
+        else:
+            outcome, time_cell = 'IN_PROGRESS', 'in progress'
+        return [
+            ['scenario', state['scenario']],
+            ['ego_speed_mps', '' if ego_v is None else ego_v],
+            ['opp_speed_mps', '' if opp_v is None else opp_v],
+            ['speed_ratio_opp_to_ego', ratio],
+            ['ego_start_x_y_theta', *state.get('ego_start', [])],
+            ['opp_start_x_y_theta', *state.get('opp_start', [])],
+            ['outcome', outcome],
+            # Overtake = opponent overtake_margin m ahead of the ego (the manager's definition).
+            ['time_to_overtake_s_from_running_start', time_cell],
+            ['lap_fraction_at_end', lap_fraction],   # ego distance / track length; 1.0 = whole lap
+            ['overtake_margin_m', state.get('overtake_margin', '')],
+        ]
+
+    def _write_summary(self, state):
+        """Replace the summary block above the column header, keeping row offsets valid."""
+        if not self.csv_file or self.csv_file.closed or self.current_sim != state['scenario']:
+            return
+        self.csv_file.flush()
+        with open(self.current_csv, newline='') as stream:
+            text = stream.read()
+        header_at = 0 if text.startswith('timestamp,') else text.find('\ntimestamp,') + 1
+        if header_at < 0:
+            return
+        block = io.StringIO()
+        writer = csv.writer(block)
+        writer.writerows(self._summary_rows(state))
+        writer.writerow([])
+        new_text = block.getvalue() + text[header_at:]
+        shift = len(new_text) - len(text)   # ASCII content: characters == bytes
+        tmp = self.current_csv + '.tmp'
+        with open(tmp, 'w', newline='') as stream:
+            stream.write(new_text)
+        self.csv_file.close()
+        os.replace(tmp, self.current_csv)
+        self.csv_file = open(self.current_csv, 'r+', newline='')
+        self.csv_file.seek(0, os.SEEK_END)
+        self.csv_writer = csv.writer(self.csv_file)
+        self.row_offsets = [(stamp, offset + shift) for stamp, offset in self.row_offsets]
 
     def defensive_imm_cb(self, message):
         if self._settled():
